@@ -76,7 +76,7 @@ function RouteCard({ route, badge, selected, offset, onSelect }: RouteCardProps)
         {badge && <span className="badge">{badge}</span>}
       </span>
       <span className="route-card-stats">
-        {formatDuration(route.travel_seconds)} · {formatMiles(route.length_miles)} · arrives {formatTime(route.arrival, offset)}
+        <strong>{formatDuration(route.travel_seconds)}</strong> · {formatMiles(route.length_miles)} · arrives {formatTime(route.arrival, offset)}
       </span>
       <RiskBar route={route} />
       <span className="route-card-foot">
@@ -105,6 +105,7 @@ const CheckpointTable = memo(function CheckpointTable({ route, offset, onFocus }
   return (
     <section className="checkpoints">
       <h3>{route.label} checkpoints <span>times are {formatOffset(offset)}, the origin's zone</span></h3>
+      <a className="skip-link" href="#map-area">Skip checkpoints, go to the map</a>
       <table>
         <thead>
           <tr><th scope="col">Mile</th><th scope="col">ETA</th><th scope="col">Risk</th><th scope="col">Forecast</th></tr>
@@ -113,7 +114,12 @@ const CheckpointTable = memo(function CheckpointTable({ route, offset, onFocus }
           {route.checkpoints.map((checkpoint) => (
             <tr key={checkpoint.index}>
               <td>
-                <button type="button" className="link" onClick={() => onFocus(route.id, checkpoint.index)}>
+                <button
+                  type="button"
+                  className="link mile-link"
+                  aria-label={`Show mile ${Math.round(checkpoint.miles)} on the map`}
+                  onClick={() => onFocus(route.id, checkpoint.index)}
+                >
                   {Math.round(checkpoint.miles)}
                 </button>
               </td>
@@ -142,6 +148,11 @@ export function Results({ analysis, selectedId, onSelect, onFocusCheckpoint }: R
   const { recommendation, routes, notices } = analysis;
   const offset = analysis.origin_utc_offset_minutes;
   const selected = routes.find((route) => route.id === selectedId) ?? routes[0];
+  // Best first. The A, B, C names stay as they are, matching the map.
+  const ordered = [...routes].sort(
+    (a, b) =>
+      recommendation.ranked_route_ids.indexOf(a.id) - recommendation.ranked_route_ids.indexOf(b.id),
+  );
 
   return (
     <div className="results">
@@ -152,7 +163,7 @@ export function Results({ analysis, selectedId, onSelect, onFocusCheckpoint }: R
         </ul>
       )}
       <div className="route-cards">
-        {routes.map((route) => (
+        {ordered.map((route) => (
           <RouteCard
             key={route.id}
             route={route}

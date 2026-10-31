@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { Checkpoint } from "../api/types";
+import { corridorSummary } from "../components/ForecastPanel";
 import { formatDuration, formatOffset, formatTime } from "./format";
 import { truckPositionAt } from "./truckPosition";
 
@@ -45,5 +46,16 @@ describe("format", () => {
   it("formats durations", () => {
     expect(formatDuration(1500)).toBe("25 min");
     expect(formatDuration(5400)).toBe("1 h 30 min");
+  });
+});
+
+describe("corridorSummary", () => {
+  const base = { start: "", hours: 1, step: 0.25, cells: [] as [number, number][] };
+  it("reads calm hours plainly", () => {
+    expect(corridorSummary({ ...base, levels: ["00"] }, 0)).toBe("Low risk across the corridor");
+  });
+  it("lists the worst risk first and counts areas", () => {
+    const levels = ["00", "03", "24", "05"];
+    expect(corridorSummary({ ...base, levels }, 1)).toBe("1 No Travel · 1 Severe · 1 Unknown of 4 areas");
   });
 });

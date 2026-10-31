@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import type { Place, TripRequest } from "../api/types";
 import { toLocalInputValue } from "../lib/format";
 import { PlaceInput } from "./PlaceInput";
@@ -16,6 +16,12 @@ interface Props {
   onSubmit: (trip: TripRequest) => void;
 }
 
+function focusFirstInvalid() {
+  requestAnimationFrame(() => {
+    document.querySelector<HTMLElement>('.trip-form [aria-invalid="true"]')?.focus();
+  });
+}
+
 export function TripForm({ busy, serverErrors, onSubmit }: Props) {
   const [origin, setOrigin] = useState<Place | null>(null);
   const [destination, setDestination] = useState<Place | null>(null);
@@ -26,6 +32,10 @@ export function TripForm({ busy, serverErrors, onSubmit }: Props) {
   const [errors, setErrors] = useState<FieldErrors>({});
 
   const shown = { ...serverErrors, ...errors };
+
+  useEffect(() => {
+    if (Object.keys(serverErrors).length) focusFirstInvalid();
+  }, [serverErrors]);
 
   function validate(): FieldErrors {
     const found: FieldErrors = {};
@@ -43,7 +53,10 @@ export function TripForm({ busy, serverErrors, onSubmit }: Props) {
     event.preventDefault();
     const found = validate();
     setErrors(found);
-    if (Object.keys(found).length) return;
+    if (Object.keys(found).length) {
+      focusFirstInvalid();
+      return;
+    }
     onSubmit({
       origin: origin!,
       destination: destination!,
@@ -100,10 +113,11 @@ export function TripForm({ busy, serverErrors, onSubmit }: Props) {
             max={MAX_LOAD_LB}
             step={500}
             aria-invalid={Boolean(shown.load_lb)}
+            aria-describedby={shown.load_lb ? "load-error" : undefined}
             value={load}
             onChange={(event) => setLoad(event.target.value)}
           />
-          {shown.load_lb && <p className="field-error">{shown.load_lb}</p>}
+          {shown.load_lb && <p id="load-error" className="field-error">{shown.load_lb}</p>}
         </div>
 
         <fieldset className="field">

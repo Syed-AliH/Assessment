@@ -208,6 +208,7 @@ export class TripMap {
     this.analysis = analysis;
     this.selectedId = selectedId;
     this.popup.remove();
+    this.map.resize();
     this.draw();
     if (analysis) this.fit(analysis.routes);
   }
@@ -306,7 +307,7 @@ export class TripMap {
     const compact = this.map.getContainer().clientWidth < 600;
     this.map.fitBounds(bounds, {
       padding: compact
-        ? { top: 90, bottom: 110, left: 30, right: 30 }
+        ? { top: 50, bottom: 30, left: 30, right: 30 }
         : { top: 90, bottom: 130, left: 70, right: 70 },
       duration: 500,
     });

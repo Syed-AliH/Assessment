@@ -86,6 +86,7 @@ export function PlaceInput({ label, value, onChange, error }: Props) {
         aria-autocomplete="list"
         aria-activedescendant={active >= 0 ? `${id}-${active}` : undefined}
         aria-invalid={Boolean(error)}
+        aria-describedby={error ? `${id}-error` : undefined}
         autoComplete="off"
         placeholder="City or address"
         value={text}
@@ -119,7 +120,7 @@ export function PlaceInput({ label, value, onChange, error }: Props) {
           {status === "failed" && <li className="place-message">Place search is unavailable right now</li>}
         </ul>
       )}
-      {error && <p className="field-error">{error}</p>}
+      {error && <p id={`${id}-error`} className="field-error">{error}</p>}
     </div>
   );
 }

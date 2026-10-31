@@ -23,7 +23,9 @@ test("short trip: routes, recommendation, heatmap, slider", async ({ page }) => 
   await runTrip(page, ["Dallas", "Dallas, TX"], ["Houston", "Houston, TX"]);
 
   expect(await page.locator(".route-card").count()).toBeGreaterThan(0);
-  await expect(page.locator(".route-card .badge").first()).toBeVisible();
+  await expect(page.locator(".route-card").first().locator(".badge")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Trip results" })).toBeFocused();
+  await expect(page.locator(".forecast-summary")).not.toBeEmpty();
   expect(await page.locator(".checkpoints tbody tr").count()).toBeGreaterThan(5);
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${SHOTS}/short-trip.png` });
@@ -67,6 +69,7 @@ test("invalid input is caught before any request", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Compare routes" }).click();
   await expect(page.getByText("Choose a place from the list.")).toHaveCount(2);
+  await expect(page.getByRole("combobox", { name: "Origin" })).toBeFocused();
   await page.getByLabel("Load weight (lb)").fill("90000");
   await page.getByRole("button", { name: "Compare routes" }).click();
   await expect(page.getByText("Enter a load from 0 to 80,000 lb.")).toBeVisible();
@@ -74,6 +77,10 @@ test("invalid input is caught before any request", async ({ page }) => {
 
 test("phone layout has no horizontal scroll", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.goto("/");
+  await page.screenshot({ path: `${SHOTS}/phone-start.png` });
+  const form = await page.locator(".trip-form").boundingBox();
+  expect(form!.y).toBeLessThan(120);
   await runTrip(page, ["Dallas", "Dallas, TX"], ["Houston", "Houston, TX"]);
   await page.waitForTimeout(1000);
   await page.screenshot({ path: `${SHOTS}/phone.png` });
@@ -157,6 +164,7 @@ test("server field errors reappear on the form", async ({ page }) => {
   });
   await expect(page.getByRole("alert")).toContainText("Check the highlighted fields.");
   await expect(page.getByText("Too heavy.")).toBeVisible();
+  await expect(page.getByLabel("Load weight (lb)")).toBeFocused();
 });
 
 test("upstream outage shows a clear error", async ({ page }) => {
@@ -164,4 +172,5 @@ test("upstream outage shows a clear error", async ({ page }) => {
     error: { code: "upstream_unavailable", message: "A data service is unavailable right now. Try again shortly." },
   });
   await expect(page.getByRole("alert")).toContainText("unavailable right now");
+  await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
 });
