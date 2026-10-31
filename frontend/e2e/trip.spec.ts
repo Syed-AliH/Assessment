@@ -174,3 +174,17 @@ test("upstream outage shows a clear error", async ({ page }) => {
   await expect(page.getByRole("alert")).toContainText("unavailable right now");
   await expect(page.getByRole("button", { name: "Try again" })).toBeVisible();
 });
+
+test("swap exchanges origin and destination", async ({ page }) => {
+  await page.goto("/");
+  await choosePlace(page, "Origin", "Dallas", "Dallas, TX");
+  await choosePlace(page, "Destination", "Houston", "Houston, TX");
+  await page.getByRole("button", { name: "Swap origin and destination" }).click();
+  await expect(page.getByRole("combobox", { name: "Origin" })).toHaveValue("Houston, TX");
+  await expect(page.getByRole("combobox", { name: "Destination" })).toHaveValue("Dallas, TX");
+  await page.getByRole("button", { name: "Compare routes" }).click();
+  await expect(page.locator(".trip-summary")).toContainText("Houston, TX");
+  await expect(page.locator(".banner")).toBeVisible();
+  await page.waitForTimeout(2500);
+  await page.screenshot({ path: `${SHOTS}/final.png` });
+});
