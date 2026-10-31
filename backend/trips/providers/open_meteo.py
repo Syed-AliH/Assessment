@@ -4,6 +4,7 @@ Only the variables the risk rules need are requested, in fixed units, with
 conversions in one place. A location with bad data is dropped, so callers see
 it as missing rather than calm.
 """
+import logging
 import threading
 import time
 from collections import deque
@@ -15,6 +16,8 @@ import httpx
 from ..domain.forecast_time import HourlySeries
 from ..domain.geo import LatLon
 from .base import ProviderError, RateLimited, UpstreamUnavailable
+
+logger = logging.getLogger(__name__)
 
 FREE_URL = "https://api.open-meteo.com/v1/forecast"
 PAID_URL = "https://customer-api.open-meteo.com/v1/forecast"
@@ -185,6 +188,7 @@ class OpenMeteoClient:
                     try:
                         result.update(future.result())
                     except ProviderError as error:
+                        logger.warning("Weather batch failed: %s", error)
                         errors.append(error)
         # One bad chunk still leaves usable data. Its points read as missing.
         if errors and not result:

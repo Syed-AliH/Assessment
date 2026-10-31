@@ -183,6 +183,12 @@ def test_weather_failure_shows_routes_as_unknown_not_low(api):
     assert "weather_unavailable" in [notice["code"] for notice in data["notices"]]
 
 
+def test_weather_rate_limit_says_so(api):
+    api(weather=FakeWeather(error=RateLimited("limit")))
+    notice = next(n for n in analyze(api).json()["notices"] if n["code"] == "weather_unavailable")
+    assert "request limit" in notice["message"]
+
+
 def test_missing_forecasts_are_unknown(api):
     api(weather=FakeWeather(missing=True))
     data = analyze(api).json()

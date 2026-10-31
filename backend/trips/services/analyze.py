@@ -1,4 +1,5 @@
 """Run a trip end to end: routes, checkpoints, weather, risk, recommendation."""
+import logging
 import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
@@ -14,12 +15,15 @@ from ..domain.sampling import Checkpoint, build_checkpoints
 from ..providers.base import (
     InvalidRequest,
     ProviderError,
+    RateLimited,
     RoutePlan,
     RoutingProvider,
     WeatherProvider,
 )
 from .route_options import TARGET_ROUTES, generate_routes
 from .weather import cached_forecast
+
+logger = logging.getLogger(__name__)
 
 FORECAST_SNAP_DEGREES = 0.1
 HOURS_OF_SERVICE_DRIVE_LIMIT_SECONDS = 11 * 3600
@@ -115,7 +119,7 @@ def _serialize_recommendation(result: Recommendation) -> dict:
 def _notices(
     routes: list[RoutePlan],
     departure_utc: datetime,
-    weather_failed: bool,
+    weather_error: ProviderError | None,
     has_unknown_checkpoints: bool,
 ) -> list[dict]:
     notices = []
@@ -123,8 +127,10 @@ def _notices(
     def add(code: str, message: str) -> None:
         notices.append({"code": code, "message": message})
 
-    if weather_failed:
-        add("weather_unavailable", "Weather data could not be loaded, so risk is unknown. Try again shortly.")
+    if isinstance(weather_error, RateLimited):
+        add("weather_unavailable", "The free weather service is at its request limit, so risk is unknown. Try again in a minute.")
+    elif weather_error:
+        add("weather_unavailable", "The weather service did not respond, so risk is unknown. Try again shortly.")
     elif has_unknown_checkpoints:
         add("forecast_gaps", "Some checkpoints have no forecast and are shown as Unknown, so these routes may be riskier than they look.")
     if len(routes) < TARGET_ROUTES:
@@ -169,12 +175,13 @@ def analyze_trip(
         for checkpoint in items
     }
     start, end = forecast_window(departure_utc, routes)
-    weather_failed = False
+    weather_error = None
     try:
         forecasts = cached_forecast(weather, list(forecast_points.values()), start, end)
-    except ProviderError:
+    except ProviderError as error:
         # Routes are still worth showing. Their risk is reported as Unknown.
-        forecasts, weather_failed = {}, True
+        logger.warning("Weather lookup failed for %d points: %s", len(forecast_points), error)
+        forecasts, weather_error = {}, error
 
     route_payloads = []
     summaries = []
@@ -235,5 +242,5 @@ def analyze_trip(
         "interval_miles": trip.interval_miles,
         "routes": route_payloads,
         "recommendation": _serialize_recommendation(recommend(summaries, trip.interval_miles)),
-        "notices": _notices(routes, departure_utc, weather_failed, has_unknown),
+        "notices": _notices(routes, departure_utc, weather_error, has_unknown),
     }
