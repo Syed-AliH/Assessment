@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { analyzeTrip, ApiError, fetchHeatmap } from "./api/client";
-import type { Analysis, TripRequest } from "./api/types";
+import { ApiError, assessTrip, buildHeatmap, planTrip } from "./api/client";
+import type { Analysis, TripPlan, TripRequest } from "./api/types";
+import { fetchForecasts } from "./api/weather";
 import { ForecastPanel, type HeatmapState } from "./components/ForecastPanel";
 import { Icon } from "./components/Icon";
 import { Results } from "./components/Results";
@@ -39,6 +40,7 @@ export default function App() {
   const [formOpen, setFormOpen] = useState(true);
   const [run, setRun] = useState(0);
   const lastTrip = useRef<TripRequest | null>(null);
+  const planRef = useRef<TripPlan | null>(null);
   const results = useRef<HTMLDivElement>(null);
 
   const placeTruck = useCallback((current: Analysis, routeId: string) => {
@@ -47,13 +49,21 @@ export default function App() {
     map.current?.setTruck(route ? truckPositionAt(route.checkpoints, moment) : null);
   }, []);
 
-  const loadHeatmap = useCallback(async (analysisId: string) => {
+  const loadHeatmap = useCallback(async (plan: TripPlan) => {
     heatmapRequest.current?.abort();
     const controller = new AbortController();
     heatmapRequest.current = controller;
     setHeatmap({ status: "loading" });
     try {
-      const data = await fetchHeatmap(analysisId, controller.signal);
+      const weather = await fetchForecasts(plan.forecast, plan.forecast.cells, controller.signal);
+      if (weather.failure) {
+        setHeatmap({
+          status: "error",
+          message: weather.reason || "The corridor forecast could not be loaded.",
+        });
+        return;
+      }
+      const data = await buildHeatmap(plan.analysis_id, weather.locations, controller.signal);
       map.current?.setHeatmap(data);
       setHeatmap({ status: "ready", heatmap: data });
     } catch (failure) {
@@ -71,7 +81,10 @@ export default function App() {
     setError(null);
     setServerErrors({});
     try {
-      const result = await analyzeTrip(trip, controller.signal);
+      const plan = await planTrip(trip, controller.signal);
+      planRef.current = plan;
+      const weather = await fetchForecasts(plan.forecast, plan.forecast.points, controller.signal);
+      const result = await assessTrip(plan.analysis_id, weather, controller.signal);
       const best =
         result.recommendation.route_id ??
         result.recommendation.least_bad_route_id ??
@@ -84,7 +97,7 @@ export default function App() {
       map.current?.setHeatmap(null);
       map.current?.setHour(0);
       setBusy(false);
-      void loadHeatmap(result.analysis_id);
+      void loadHeatmap(plan);
     } catch (failure) {
       if (failure instanceof ApiError) {
         setError(failure.message);
@@ -204,7 +217,7 @@ export default function App() {
           state={heatmap}
           offset={analysis?.origin_utc_offset_minutes ?? 0}
           onHour={changeHour}
-          onRetry={() => analysis && loadHeatmap(analysis.analysis_id)}
+          onRetry={() => planRef.current && loadHeatmap(planRef.current)}
         />
       </main>
     </div>

@@ -2,8 +2,7 @@
 from django.conf import settings
 from django.utils.module_loading import import_string
 
-from .base import Geocoder, RoutingProvider, WeatherProvider
-from .open_meteo import OpenMeteoClient
+from .base import Geocoder, RoutingProvider
 from .tomtom import TomTomClient
 
 
@@ -18,6 +17,3 @@ def geocoder() -> Geocoder:
         return import_string(settings.GEOCODER)()
     return TomTomClient(settings.TOMTOM_API_KEY)
 
-
-def weather_provider() -> WeatherProvider:
-    return OpenMeteoClient(settings.OPEN_METEO_API_KEY)

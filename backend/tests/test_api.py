@@ -4,7 +4,6 @@ from datetime import datetime, timedelta, timezone
 import pytest
 from rest_framework.test import APIClient
 
-from trips.domain.forecast_time import HourlySeries
 from trips.domain.sampling import TimingAnchor
 from trips.providers import registry
 from trips.providers.base import (
@@ -62,25 +61,25 @@ class FakeWeather:
         self.error = error
         self.requested = []
 
-    def forecast(self, points, start, end):
-        self.requested.append(list(points))
-        if self.error:
-            raise self.error
+    def locations(self, points):
+        """What a browser would submit: raw Open-Meteo data, in order."""
+        self.requested.append(points)
         if self.missing:
-            return {}
+            return [None] * len(points)
         first = int(DEPARTURE.timestamp()) - 24 * HOUR
         times = [first + i * HOUR for i in range(200)]
-        result = {}
-        for point in points:
-            stormy = self.storm_west_of is not None and point[1] < self.storm_west_of
+        result = []
+        for _, lon in points:
+            stormy = self.storm_west_of is not None and lon < self.storm_west_of
             wind = self.storm_wind if stormy else 5.0
-            result[point] = HourlySeries(
-                times=times,
-                wind_mph=[wind] * 200,
-                gust_mph=[wind * 1.3] * 200,
-                rain_in=[0.0] * 200,
-                snow_in=[0.0] * 200,
-            )
+            result.append({"hourly": {
+                "time": times,
+                "wind_speed_10m": [wind] * 200,
+                "wind_gusts_10m": [wind * 1.3] * 200,
+                "rain": [0.0] * 200,
+                "showers": [0.0] * 200,
+                "snowfall": [0.0] * 200,
+            }})
         return result
 
 
@@ -92,13 +91,14 @@ def api(monkeypatch, settings):
         routing = routing or FakeRouting()
         weather = weather or FakeWeather()
         monkeypatch.setattr("trips.views.routing_provider", lambda: routing)
-        monkeypatch.setattr("trips.views.weather_provider", lambda: weather)
+        install.weather = weather
         return routing, weather
 
     monkeypatch.setattr(
         "rest_framework.throttling.ScopedRateThrottle.allow_request", lambda *a: True
     )
     install.client = APIClient()
+    install.cells = {}
     return install
 
 
@@ -113,7 +113,24 @@ def body(**overrides):
 
 
 def analyze(api, **overrides):
-    return api.client.post("/api/trips/analyze", body(**overrides), format="json")
+    """Plan, then submit forecasts as the browser would."""
+    plan_response = api.client.post("/api/trips/plan", body(**overrides), format="json")
+    if plan_response.status_code != 200:
+        return plan_response
+    plan_data = plan_response.json()
+    weather = api.weather
+    if weather.error:
+        limited = isinstance(weather.error, RateLimited)
+        submission = {"failure": "rate_limited" if limited else "unavailable", "reason": str(weather.error)}
+    else:
+        submission = {"locations": weather.locations(plan_data["forecast"]["points"])}
+    api.cells[plan_data["analysis_id"]] = plan_data["forecast"]["cells"]
+    return api.client.post(f"/api/trips/{plan_data['analysis_id']}/assess", submission, format="json")
+
+
+def heatmap(api, analysis_id):
+    locations = api.weather.locations(api.cells[analysis_id])
+    return api.client.post(f"/api/trips/{analysis_id}/heatmap", {"locations": locations}, format="json")
 
 
 def test_happy_path_contract(api):
@@ -303,7 +320,7 @@ def test_routing_errors_are_typed(api, error, status, code):
 def test_heatmap_contract(api):
     api()
     analysis_id = analyze(api).json()["analysis_id"]
-    response = api.client.get(f"/api/trips/{analysis_id}/heatmap")
+    response = heatmap(api, analysis_id)
     assert response.status_code == 200
     data = response.json()
     assert len(data["cells"]) == len(data["levels"]) > 0
@@ -315,41 +332,47 @@ def test_heatmap_applies_load_rules(api):
     api(weather=FakeWeather(storm_wind=50, storm_west_of=0))
     light = analyze(api, load_lb=30_000).json()["analysis_id"]
     heavy = analyze(api, load_lb=30_001).json()["analysis_id"]
-    assert set("".join(api.client.get(f"/api/trips/{light}/heatmap").json()["levels"])) == {"3"}
-    assert set("".join(api.client.get(f"/api/trips/{heavy}/heatmap").json()["levels"])) == {"4"}
+    assert set("".join(heatmap(api, light).json()["levels"])) == {"3"}
+    assert set("".join(heatmap(api, heavy).json()["levels"])) == {"4"}
 
 
 def test_heatmap_missing_forecast_is_unknown(api):
-    api()
-    analysis_id = analyze(api).json()["analysis_id"]
     api(weather=FakeWeather(missing=True))
-    from django.core.cache import cache
-
-    for key in list(cache._cache):
-        if "wx:" in key:
-            del cache._cache[key]
-    levels = api.client.get(f"/api/trips/{analysis_id}/heatmap").json()["levels"]
-    assert set("".join(levels)) == {"5"}
+    analysis_id = analyze(api).json()["analysis_id"]
+    assert set("".join(heatmap(api, analysis_id).json()["levels"])) == {"5"}
 
 
-def test_heatmap_failure_is_an_error_not_a_blank_map(api):
+def test_forecast_count_must_match_the_plan(api):
     api()
     analysis_id = analyze(api).json()["analysis_id"]
-    api(weather=FakeWeather(error=RateLimited("x")))
-    from django.core.cache import cache
+    for step in ("assess", "heatmap"):
+        response = api.client.post(f"/api/trips/{analysis_id}/{step}", {"locations": [None]}, format="json")
+        assert response.status_code == 400
+        assert response.json()["error"]["code"] == "validation_error"
 
-    for key in list(cache._cache):
-        if "wx:" in key:
-            del cache._cache[key]
-    response = api.client.get(f"/api/trips/{analysis_id}/heatmap")
-    assert response.status_code == 429
+
+def test_tampered_forecast_reads_as_unknown_not_low(api):
+    api()
+    plan_data = api.client.post("/api/trips/plan", body(), format="json").json()
+    bad = [{"hourly": {"time": ["x"]}} for _ in plan_data["forecast"]["points"]]
+    response = api.client.post(f"/api/trips/{plan_data['analysis_id']}/assess", {"locations": bad}, format="json")
+    assert response.json()["routes"][0]["risk"]["coverage"] == 0
+
+
+def test_plan_gives_the_browser_a_keyless_weather_request(api):
+    api()
+    forecast = api.client.post("/api/trips/plan", body(), format="json").json()["forecast"]
+    assert forecast["url"].startswith("https://api.open-meteo.com/")
+    assert "wind_speed_10m" in forecast["params"]["hourly"]
+    assert forecast["points"] and forecast["cells"]
 
 
 def test_expired_analysis(api):
     api()
-    response = api.client.get("/api/trips/doesnotexist/heatmap")
-    assert response.status_code == 404
-    assert response.json()["error"]["code"] == "analysis_expired"
+    for step in ("assess", "heatmap"):
+        response = api.client.post(f"/api/trips/doesnotexist/{step}", {"locations": []}, format="json")
+        assert response.status_code == 404
+        assert response.json()["error"]["code"] == "analysis_expired"
 
 
 def test_geocode(api, monkeypatch):

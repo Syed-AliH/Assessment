@@ -2,10 +2,10 @@ from rest_framework.response import Response
 from rest_framework.throttling import ScopedRateThrottle
 from rest_framework.views import APIView
 
-from .providers.registry import geocoder, routing_provider, weather_provider
-from .serializers import TripRequestSerializer
-from .services.analyze import TripRequest, analyze_trip
-from .services.heatmap import cached_heatmap
+from .providers.registry import geocoder, routing_provider
+from .serializers import ForecastSubmissionSerializer, TripRequestSerializer
+from .services.analyze import TripRequest, WeatherFailure, assess_trip, plan_trip
+from .services.heatmap import build_heatmap
 
 MIN_QUERY_LENGTH = 3
 MAX_QUERY_LENGTH = 120
@@ -27,9 +27,9 @@ class GeocodeView(APIView):
         })
 
 
-class AnalyzeView(APIView):
+class PlanView(APIView):
     throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "analyze"
+    throttle_scope = "plan"
 
     def post(self, request):
         serializer = TripRequestSerializer(data=request.data)
@@ -42,12 +42,30 @@ class AnalyzeView(APIView):
             load_lb=data["load_lb"],
             interval_miles=data["interval_miles"],
         )
-        return Response(analyze_trip(trip, routing_provider(), weather_provider()))
+        return Response(plan_trip(trip, routing_provider()))
+
+
+class AssessView(APIView):
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "forecast"
+
+    def post(self, request, analysis_id: str):
+        serializer = ForecastSubmissionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        data = serializer.validated_data
+        failure = None
+        if data.get("failure"):
+            failure = WeatherFailure(
+                rate_limited=data["failure"] == "rate_limited", reason=data["reason"]
+            )
+        return Response(assess_trip(analysis_id, data["locations"], failure))
 
 
 class HeatmapView(APIView):
     throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "analyze"
+    throttle_scope = "forecast"
 
-    def get(self, request, analysis_id: str):
-        return Response(cached_heatmap(analysis_id, weather_provider()))
+    def post(self, request, analysis_id: str):
+        serializer = ForecastSubmissionSerializer(data=request.data)
+        serializer.is_valid(raise_exception=True)
+        return Response(build_heatmap(analysis_id, serializer.validated_data["locations"]))

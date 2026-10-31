@@ -13,6 +13,14 @@ LOCAL_CLOCK_MARGIN = timedelta(hours=12)
 MIN_TRIP_MILES = 1.0
 
 
+class ForecastSubmissionSerializer(serializers.Serializer):
+    """Forecasts from the browser, in the order the plan asked for them."""
+
+    locations = serializers.ListField(allow_empty=True, default=list)
+    failure = serializers.ChoiceField(choices=("rate_limited", "unavailable"), required=False)
+    reason = serializers.CharField(max_length=200, required=False, allow_blank=True, default="")
+
+
 class PlaceSerializer(serializers.Serializer):
     label = serializers.CharField(max_length=200, required=False, allow_blank=True)
     lat = serializers.FloatField(min_value=-90, max_value=90)

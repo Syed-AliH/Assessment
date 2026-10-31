@@ -1,4 +1,10 @@
-"""Run a trip end to end: routes, checkpoints, weather, risk, recommendation."""
+"""Run a trip in two steps, with the visitor's browser fetching weather between.
+
+`plan_trip` finds the routes and says which forecasts are needed. The browser
+downloads them, so that each visitor spends their own weather quota rather
+than one shared server allowance. `assess_trip` then does all of the risk work
+here, on those forecasts.
+"""
 import logging
 import uuid
 from dataclasses import dataclass
@@ -7,7 +13,8 @@ from datetime import date, datetime, timedelta, timezone
 from django.conf import settings
 from django.core.cache import cache
 
-from ..domain.forecast_time import WeatherSample, sample_at
+from ..domain.corridor import build_corridor
+from ..domain.forecast_time import HourlySeries, WeatherSample, sample_at
 from ..domain.geo import (
     MILES_PER_DEGREE_LAT,
     LatLon,
@@ -18,16 +25,9 @@ from ..domain.geo import (
 from ..domain.ranking import Recommendation, RouteRisk, recommend, summarize_route
 from ..domain.risk import UNKNOWN, RiskAssessment, RiskLevel, classify
 from ..domain.sampling import Checkpoint, build_checkpoints
-from ..providers.base import (
-    InvalidRequest,
-    ProviderError,
-    RateLimited,
-    RoutePlan,
-    RoutingProvider,
-    WeatherProvider,
-)
+from ..providers.base import InvalidRequest, RoutePlan, RoutingProvider
+from ..providers.open_meteo import clamp_range, forecast_request, parse_location
 from .route_options import TARGET_ROUTES, generate_routes
-from .weather import cached_forecast
 
 logger = logging.getLogger(__name__)
 
@@ -38,8 +38,8 @@ MAX_FORECAST_POINTS = 250
 HOURS_OF_SERVICE_DRIVE_LIMIT_SECONDS = 11 * 3600
 LOW_CONFIDENCE_LEAD_DAYS = 7
 SLIDER_HOURS = 48
-PAST_DEPARTURE_GRACE = timedelta(minutes=5)
 GEOMETRY_TOLERANCE_DEGREES = 0.0004  # about 40 m, invisible at trip zoom
+PAST_DEPARTURE_GRACE = timedelta(minutes=5)
 ROUTE_LABELS = ("Route A", "Route B", "Route C")
 ROUTE_IDS = ("a", "b", "c")
 
@@ -52,6 +52,14 @@ RISK_NAMES = {
 }
 
 
+class AnalysisExpired(Exception):
+    pass
+
+
+class ForecastMismatch(Exception):
+    """The submitted forecasts do not line up with the points that were asked for."""
+
+
 @dataclass(frozen=True)
 class TripRequest:
     origin: LatLon
@@ -59,6 +67,14 @@ class TripRequest:
     departure: datetime | None  # naive, origin-local. None means now.
     load_lb: float
     interval_miles: int
+
+
+@dataclass(frozen=True)
+class WeatherFailure:
+    """Why the browser could not get forecasts."""
+
+    rate_limited: bool
+    reason: str = ""
 
 
 def _iso(moment: datetime) -> str:
@@ -75,6 +91,88 @@ def forecast_window(departure_utc: datetime, routes: list[RoutePlan]) -> tuple[d
     span = timedelta(seconds=max(longest, SLIDER_HOURS * 3600))
     # One extra hour: rain at the last moment reads the following timestamp.
     return departure_utc.date(), (departure_utc + span + timedelta(hours=1)).date()
+
+
+def load_record(analysis_id: str) -> dict:
+    record = cache.get(f"analysis:{analysis_id}")
+    if record is None:
+        raise AnalysisExpired(analysis_id)
+    return record
+
+
+def parse_forecasts(points: list[LatLon], locations: list) -> dict[LatLon, HourlySeries]:
+    """Pair submitted forecasts with their points. Bad ones read as missing."""
+    if len(locations) != len(points):
+        raise ForecastMismatch()
+    parsed = ((point, parse_location(raw)) for point, raw in zip(points, locations))
+    return {point: series for point, series in parsed if series is not None}
+
+
+def plan_trip(trip: TripRequest, routing: RoutingProvider) -> dict:
+    routes = generate_routes(
+        routing, trip.origin, trip.destination, trip.departure,
+        trip.load_lb + settings.TRUCK_TARE_LB,
+    )
+    departure = routes[0].departure
+    departure_utc = departure.astimezone(timezone.utc)
+    # TomTom accepts past times, and only its response knows the origin's zone.
+    if trip.departure and departure_utc < datetime.now(timezone.utc) - PAST_DEPARTURE_GRACE:
+        raise InvalidRequest("Departure time is in the past for the origin's time zone.")
+
+    checkpoints = [
+        build_checkpoints(
+            route.points, route.length_miles, route.travel_seconds,
+            trip.interval_miles, route.anchors,
+        )
+        for route in routes
+    ]
+    forecast_step = coarsest_needed_step(
+        [(checkpoint.lat, checkpoint.lon) for items in checkpoints for checkpoint in items],
+        FORECAST_SNAP_STEPS,
+        MAX_FORECAST_POINTS,
+    )
+    window = clamp_range(
+        *forecast_window(departure_utc, routes), datetime.now(timezone.utc).date()
+    )
+    if window is None:
+        raise InvalidRequest("Departure is past the range of the forecast.")
+
+    forecast_points = {
+        (route_index, checkpoint.index): snap_point(
+            (checkpoint.lat, checkpoint.lon), forecast_step
+        )
+        for route_index, items in enumerate(checkpoints)
+        for checkpoint in items
+    }
+    points = list(dict.fromkeys(forecast_points.values()))
+    corridor = build_corridor([
+        simplify(route.points, GEOMETRY_TOLERANCE_DEGREES) for route in routes
+    ])
+
+    analysis_id = uuid.uuid4().hex
+    cache.set(
+        f"analysis:{analysis_id}",
+        {
+            "routes": routes,
+            "checkpoints": checkpoints,
+            "departure": departure,
+            "load_lb": trip.load_lb,
+            "interval_miles": trip.interval_miles,
+            "forecast_step": forecast_step,
+            "forecast_points": forecast_points,
+            "points": points,
+            "corridor": corridor,
+        },
+        settings.ANALYSIS_CACHE_SECONDS,
+    )
+    return {
+        "analysis_id": analysis_id,
+        "forecast": {
+            **forecast_request(*window),
+            "points": points,
+            "cells": corridor.cells,
+        },
+    }
 
 
 def _serialize_checkpoint(
@@ -128,7 +226,7 @@ def _serialize_recommendation(result: Recommendation) -> dict:
 def _notices(
     routes: list[RoutePlan],
     departure_utc: datetime,
-    weather_error: ProviderError | None,
+    weather_failure: WeatherFailure | None,
     has_unknown_checkpoints: bool,
     forecast_step: float,
 ) -> list[dict]:
@@ -137,9 +235,9 @@ def _notices(
     def add(code: str, message: str) -> None:
         notices.append({"code": code, "message": message})
 
-    if isinstance(weather_error, RateLimited):
-        add("weather_unavailable", f"The free weather service is at its request limit, so risk is unknown. {weather_error}")
-    elif weather_error:
+    if weather_failure and weather_failure.rate_limited:
+        add("weather_unavailable", f"The free weather service is at its request limit, so risk is unknown. {weather_failure.reason}".strip())
+    elif weather_failure:
         add("weather_unavailable", "The weather service did not respond, so risk is unknown. Try again shortly.")
     elif has_unknown_checkpoints:
         add("forecast_gaps", "Some checkpoints have no forecast and are shown as Unknown, so these routes may be riskier than they look.")
@@ -159,46 +257,23 @@ def _notices(
     return notices
 
 
-def analyze_trip(
-    trip: TripRequest, routing: RoutingProvider, weather: WeatherProvider
+def assess_trip(
+    analysis_id: str, locations: list, weather_failure: WeatherFailure | None
 ) -> dict:
-    routes = generate_routes(
-        routing, trip.origin, trip.destination, trip.departure,
-        trip.load_lb + settings.TRUCK_TARE_LB,
-    )
-    departure = routes[0].departure
+    record = load_record(analysis_id)
+    routes: list[RoutePlan] = record["routes"]
+    forecast_points = record["forecast_points"]
+    load_lb = record["load_lb"]
+    interval_miles = record["interval_miles"]
+    departure = record["departure"]
     departure_utc = departure.astimezone(timezone.utc)
-    # TomTom accepts past times, and only its response knows the origin's zone.
-    if trip.departure and departure_utc < datetime.now(timezone.utc) - PAST_DEPARTURE_GRACE:
-        raise InvalidRequest("Departure time is in the past for the origin's time zone.")
-    checkpoints = [
-        build_checkpoints(
-            route.points, route.length_miles, route.travel_seconds,
-            trip.interval_miles, route.anchors,
-        )
-        for route in routes
-    ]
 
-    forecast_step = coarsest_needed_step(
-        [(checkpoint.lat, checkpoint.lon) for items in checkpoints for checkpoint in items],
-        FORECAST_SNAP_STEPS,
-        MAX_FORECAST_POINTS,
-    )
-    forecast_points = {
-        (route_index, checkpoint.index): snap_point(
-            (checkpoint.lat, checkpoint.lon), forecast_step
-        )
-        for route_index, items in enumerate(checkpoints)
-        for checkpoint in items
-    }
-    start, end = forecast_window(departure_utc, routes)
-    weather_error = None
-    try:
-        forecasts = cached_forecast(weather, list(forecast_points.values()), start, end)
-    except ProviderError as error:
+    if weather_failure:
         # Routes are still worth showing. Their risk is reported as Unknown.
-        logger.warning("Weather lookup failed for %d points: %s", len(forecast_points), error)
-        forecasts, weather_error = {}, error
+        logger.warning("Browser weather lookup failed: %s", weather_failure)
+        forecasts: dict[LatLon, HourlySeries] = {}
+    else:
+        forecasts = parse_forecasts(record["points"], locations)
 
     route_payloads = []
     summaries = []
@@ -206,12 +281,12 @@ def analyze_trip(
     for route_index, route in enumerate(routes):
         serialized = []
         segments = []
-        for checkpoint in checkpoints[route_index]:
+        for checkpoint in record["checkpoints"][route_index]:
             series = forecasts.get(forecast_points[route_index, checkpoint.index])
             moment = departure_utc.timestamp() + checkpoint.eta_seconds
             sample = sample_at(series, moment) if series else None
             risk = (
-                classify(sample.wind_mph, sample.rain_in_hr, sample.snow_in_hr, trip.load_lb)
+                classify(sample.wind_mph, sample.rain_in_hr, sample.snow_in_hr, load_lb)
                 if sample
                 else UNKNOWN
             )
@@ -238,26 +313,16 @@ def analyze_trip(
             "checkpoints": serialized,
         })
 
-    analysis_id = uuid.uuid4().hex
-    cache.set(
-        f"analysis:{analysis_id}",
-        {
-            "routes": [route.points for route in routes],
-            "departure_utc": departure_utc,
-            "load_lb": trip.load_lb,
-            "window": (start, end),
-        },
-        settings.ANALYSIS_CACHE_SECONDS,
-    )
-
     offset = departure.utcoffset()
     return {
         "analysis_id": analysis_id,
         "departure": _iso(departure_utc),
         "origin_utc_offset_minutes": round(offset.total_seconds() / 60) if offset else 0,
-        "load_lb": trip.load_lb,
-        "interval_miles": trip.interval_miles,
+        "load_lb": load_lb,
+        "interval_miles": interval_miles,
         "routes": route_payloads,
-        "recommendation": _serialize_recommendation(recommend(summaries, trip.interval_miles)),
-        "notices": _notices(routes, departure_utc, weather_error, has_unknown, forecast_step),
+        "recommendation": _serialize_recommendation(recommend(summaries, interval_miles)),
+        "notices": _notices(
+            routes, departure_utc, weather_failure, has_unknown, record["forecast_step"]
+        ),
     }

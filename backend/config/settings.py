@@ -55,19 +55,20 @@ REST_FRAMEWORK = {
     "UNAUTHENTICATED_USER": None,
     "EXCEPTION_HANDLER": "trips.errors.api_exception_handler",
     # Each analysis spends API quota, so anonymous use has to be bounded.
-    "DEFAULT_THROTTLE_RATES": {"analyze": "30/min", "geocode": "120/min"},
+    "DEFAULT_THROTTLE_RATES": {"plan": "30/min", "forecast": "60/min", "geocode": "120/min"},
 }
+
+# Forecasts for a long trip arrive from the browser in one request.
+DATA_UPLOAD_MAX_MEMORY_SIZE = 20 * 1024 * 1024
 
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_CONTENT_TYPE_NOSNIFF = True
 
 TOMTOM_API_KEY = os.environ.get("TOMTOM_API_KEY", "")
-OPEN_METEO_API_KEY = os.environ.get("OPEN_METEO_API_KEY", "")
 # Dotted paths that replace a provider. Unset in production.
 ROUTING_PROVIDER = os.environ.get("ROUTING_PROVIDER", "")
 GEOCODER = os.environ.get("GEOCODER", "")
 
 # Tractor-trailer empty weight, added to the load for truck road restrictions.
 TRUCK_TARE_LB = float(os.environ.get("TRUCK_TARE_LB", 33_000))
-WEATHER_CACHE_SECONDS = 60 * 60
 ANALYSIS_CACHE_SECONDS = 60 * 60

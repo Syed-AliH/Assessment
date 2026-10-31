@@ -1,4 +1,4 @@
-import type { Analysis, Heatmap, Place, TripRequest } from "./types";
+import type { Analysis, ForecastResult, Heatmap, Place, TripPlan, TripRequest } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -38,15 +38,23 @@ export async function searchPlaces(query: string, signal: AbortSignal): Promise<
   return data.results;
 }
 
-export function analyzeTrip(trip: TripRequest, signal: AbortSignal): Promise<Analysis> {
-  return request<Analysis>("/api/trips/analyze", {
+function post<T>(url: string, body: unknown, signal: AbortSignal): Promise<T> {
+  return request<T>(url, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(trip),
+    body: JSON.stringify(body),
     signal,
   });
 }
 
-export function fetchHeatmap(analysisId: string, signal: AbortSignal): Promise<Heatmap> {
-  return request<Heatmap>(`/api/trips/${analysisId}/heatmap`, { signal });
+export function planTrip(trip: TripRequest, signal: AbortSignal): Promise<TripPlan> {
+  return post<TripPlan>("/api/trips/plan", trip, signal);
+}
+
+export function assessTrip(analysisId: string, forecast: ForecastResult, signal: AbortSignal): Promise<Analysis> {
+  return post<Analysis>(`/api/trips/${analysisId}/assess`, forecast, signal);
+}
+
+export function buildHeatmap(analysisId: string, locations: unknown[], signal: AbortSignal): Promise<Heatmap> {
+  return post<Heatmap>(`/api/trips/${analysisId}/heatmap`, { locations }, signal);
 }

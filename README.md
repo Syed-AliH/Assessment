@@ -6,7 +6,7 @@ A React and Django app that helps a truck driver choose the safest route. It com
 
 1. **Routes.** TomTom truck routing, using gross weight, departure time and traffic. If it returns fewer than three distinct routes, the app adds via-point detours. It never pads with near-duplicates, and says so when fewer than three exist.
 2. **Checkpoints.** Every 10, 25 or 50 miles, plus both ends. ETAs interpolate between TomTom's per-instruction timings, so city and highway speeds are respected.
-3. **Weather.** Open-Meteo's hourly forecast, read at each checkpoint's ETA.
+3. **Weather.** The server says which forecasts are needed, and the visitor's browser downloads them from Open-Meteo. Each visitor therefore spends their own quota, not one shared server allowance. The server then reads each forecast at the checkpoint's ETA, and all risk logic stays on the server.
 4. **Risk.** The worst of wind, rain and snow after the load rules, in `backend/trips/domain/risk.py`.
 5. **Recommendation.** Ranked in `backend/trips/domain/ranking.py`, with an explanation naming the criterion that decided it.
 6. **Heatmap.** Risk on a grid around the routes for each hour from 0 to 48. All 49 hours load once, so the slider changes one paint property and makes no network calls.
@@ -27,8 +27,9 @@ frontend/src/
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/geocode?q=` | Place search (US and Canada) |
-| POST | `/api/trips/analyze` | Routes, checkpoints, risk, recommendation, `analysis_id` |
-| GET | `/api/trips/{analysis_id}/heatmap` | 49 hours of risk per grid cell |
+| POST | `/api/trips/plan` | Routes, plus the forecast request the browser should make |
+| POST | `/api/trips/{analysis_id}/assess` | Takes forecasts, returns checkpoints, risk and the recommendation |
+| POST | `/api/trips/{analysis_id}/heatmap` | Takes corridor forecasts, returns 49 hours of risk per grid cell |
 
 Failures always have the shape `{"error": {"code", "message", "fields?"}}`.
 
@@ -60,7 +61,7 @@ The brief leaves these open. Each one is covered by tests.
 - ETAs assume continuous driving with no rest stops. The app says so on trips over 11 hours, because hours-of-service rules would shift both arrival times and the weather met.
 - Freezing rain, visibility and official weather alerts are not modelled, since the brief does not rate them.
 - Hourly forecasts smooth out short bursts. A single-cell convective forecast can look alarming for one hour and is low-confidence by nature.
-- The free Open-Meteo API is for non-commercial use and allows 600 calls a minute and 10,000 a day. The app budgets one call per location, so very long trips at 10-mile sampling can take a couple of minutes on a cold cache. It waits rather than dropping data. Set `OPEN_METEO_API_KEY` for commercial use.
+- The free Open-Meteo API is for non-commercial use and allows 600 calls a minute and 10,000 a day per IP address. Each trip is capped at about 550 locations, so on long trips nearby checkpoints share a forecast and the app says so. Forecasts sent by a browser are validated, and only affect that visitor's own result.
 
 ## Running locally
 

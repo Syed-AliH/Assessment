@@ -43,7 +43,7 @@ test("slider never touches the network and stays fast", async ({ page }) => {
 
   let apiCalls = 0;
   page.on("request", (request) => {
-    if (request.url().includes("/api/")) apiCalls += 1;
+    if (request.url().includes("/api/") || request.url().includes("open-meteo")) apiCalls += 1;
   });
   await page.evaluate(() => performance.clearMeasures("heat-update"));
   for (let hour = 0; hour <= 48; hour += 1) {
@@ -131,7 +131,11 @@ function cannedAnalysis(status: string, risk: string) {
 }
 
 async function submitWith(page: Page, status: number, body: unknown) {
-  await page.route("**/api/trips/analyze", (route) => route.fulfill({ status, json: body }));
+  const forecast = { url: "https://example.invalid", params: {}, points: [], cells: [] };
+  await page.route("**/api/trips/plan", (route) =>
+    route.fulfill(status === 200 ? { json: { analysis_id: "canned", forecast } } : { status, json: body }),
+  );
+  await page.route("**/api/trips/canned/assess", (route) => route.fulfill({ json: body }));
   await page.route("**/api/trips/canned/heatmap", (route) =>
     route.fulfill({ status: 503, json: { error: { code: "upstream_unavailable", message: "Heatmap unavailable." } } }),
   );
@@ -187,4 +191,28 @@ test("swap exchanges origin and destination", async ({ page }) => {
   await expect(page.locator(".banner")).toBeVisible();
   await page.waitForTimeout(2500);
   await page.screenshot({ path: `${SHOTS}/final.png` });
+});
+
+test("weather comes from the browser, so a server limit cannot block it", async ({ page }) => {
+  const weatherCalls: string[] = [];
+  page.on("request", (request) => {
+    if (request.url().includes("api.open-meteo.com")) weatherCalls.push(request.url());
+  });
+  await runTrip(page, ["Dallas", "Dallas, TX"], ["Houston", "Houston, TX"]);
+  expect(weatherCalls.length).toBeGreaterThanOrEqual(2);
+  await expect(page.getByText("request limit")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Not enough forecast data" })).toHaveCount(0);
+});
+
+test("a browser weather limit reads as Unknown with the service's reason", async ({ page }) => {
+  await page.route("**/api.open-meteo.com/**", (route) =>
+    route.fulfill({ status: 429, json: { error: true, reason: "Daily API request limit exceeded." } }),
+  );
+  await page.goto("/");
+  await choosePlace(page, "Origin", "Dallas", "Dallas, TX");
+  await choosePlace(page, "Destination", "Houston", "Houston, TX");
+  await page.getByRole("button", { name: "Compare routes" }).click();
+  await expect(page.getByRole("heading", { name: "Not enough forecast data" })).toBeVisible();
+  await expect(page.locator(".notices")).toContainText("Daily API request limit exceeded.");
+  await expect(page.locator(".forecast-status")).toContainText("Daily API request limit exceeded.");
 });

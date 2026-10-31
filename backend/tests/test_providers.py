@@ -6,24 +6,13 @@ import httpx
 import pytest
 import respx
 
-from trips.providers import open_meteo
 from trips.providers.base import (
     NoRouteFound,
     RateLimited,
     UpstreamUnavailable,
 )
-from trips.providers.open_meteo import (
-    FREE_URL,
-    MinuteBudget,
-    OpenMeteoClient,
-    clamp_range,
-    parse_location,
-)
+from trips.providers.open_meteo import clamp_range, parse_location
 from trips.providers.tomtom import BASE_URL, TomTomClient, parse_route
-
-POINT = (30.0, -97.0)
-TODAY = date.today()
-TOMORROW = TODAY + timedelta(days=1)
 
 
 def hourly(**overrides):
@@ -36,10 +25,6 @@ def hourly(**overrides):
         "snowfall": [2.54, 0.0],
     }
     return {"hourly": {**base, **overrides}}
-
-
-def client():
-    return OpenMeteoClient(budget=MinuteBudget(10_000))
 
 
 def test_units_convert_to_inches_and_rain_includes_showers():
@@ -70,90 +55,17 @@ def test_range_is_trimmed_to_forecast_window():
     assert clamp_range(date(2026, 2, 1), date(2026, 2, 3), today) is None
 
 
-@respx.mock
-def test_single_location_object_response():
-    respx.get(FREE_URL).mock(return_value=httpx.Response(200, json=hourly()))
-    result = client().forecast([POINT], TODAY, TOMORROW)
-    assert list(result) == [POINT]
-
-
-@respx.mock
-def test_bad_location_in_batch_is_dropped_not_zeroed():
-    other = (31.0, -97.0)
-    respx.get(FREE_URL).mock(return_value=httpx.Response(200, json=[hourly(), {}]))
-    result = client().forecast([POINT, other], TODAY, TOMORROW)
-    assert list(result) == [POINT]
-
-
-@respx.mock
-def test_wrong_location_count_is_an_error():
-    respx.get(FREE_URL).mock(return_value=httpx.Response(200, json=[hourly()]))
-    with pytest.raises(UpstreamUnavailable):
-        client().forecast([POINT, (31.0, -97.0)], TODAY, TOMORROW)
-
-
-@respx.mock
-def test_retry_recovers_from_a_transient_failure(monkeypatch):
-    monkeypatch.setattr(open_meteo, "BACKOFF_SECONDS", 0)
-    route = respx.get(FREE_URL).mock(
-        side_effect=[httpx.Response(500), httpx.Response(200, json=hourly())]
-    )
-    assert POINT in client().forecast([POINT], TODAY, TOMORROW)
-    assert route.call_count == 2
-
-
-@respx.mock
 @pytest.mark.parametrize(
-    "status, expected", [(429, RateLimited), (500, UpstreamUnavailable), (400, UpstreamUnavailable)]
+    "bad",
+    [
+        hourly(time=["soon", "later"]),
+        hourly(time=[4600, 1000]),
+        hourly(wind_speed_10m=["high", 20.0]),
+        hourly(rain=[True, 0.0]),
+    ],
 )
-def test_persistent_failures_raise(monkeypatch, status, expected):
-    monkeypatch.setattr(open_meteo, "BACKOFF_SECONDS", 0)
-    respx.get(FREE_URL).mock(return_value=httpx.Response(status, text="nope"))
-    with pytest.raises(expected):
-        client().forecast([POINT], TODAY, TOMORROW)
-
-
-@respx.mock
-def test_timeout_raises_unavailable(monkeypatch):
-    monkeypatch.setattr(open_meteo, "BACKOFF_SECONDS", 0)
-    respx.get(FREE_URL).mock(side_effect=httpx.ConnectTimeout("slow"))
-    with pytest.raises(UpstreamUnavailable):
-        client().forecast([POINT], TODAY, TOMORROW)
-
-
-@respx.mock
-def test_one_failed_chunk_keeps_the_other(monkeypatch):
-    monkeypatch.setattr(open_meteo, "BACKOFF_SECONDS", 0)
-    monkeypatch.setattr(open_meteo, "CHUNK_SIZE", 1)
-    monkeypatch.setattr(open_meteo, "WORKERS", 1)
-    respx.get(FREE_URL).mock(
-        side_effect=[httpx.Response(200, json=hourly())] + [httpx.Response(500)] * 3
-    )
-    result = client().forecast([POINT, (31.0, -97.0)], TODAY, TOMORROW)
-    assert len(result) == 1
-
-
-@respx.mock
-def test_rate_limit_is_not_retried_and_keeps_the_reason():
-    route = respx.get(FREE_URL).mock(
-        return_value=httpx.Response(429, json={"reason": "Hourly API request limit exceeded."})
-    )
-    with pytest.raises(RateLimited, match="Hourly"):
-        client().forecast([POINT], TODAY, TOMORROW)
-    assert route.call_count == 1
-
-
-def test_budget_blocks_when_no_room_within_max_wait():
-    budget = MinuteBudget(10, window=60)
-    budget.acquire(10)
-    with pytest.raises(RateLimited):
-        budget.acquire(1, max_wait=0.01)
-
-
-def test_budget_refills_after_window():
-    budget = MinuteBudget(10, window=0.02)
-    budget.acquire(10)
-    budget.acquire(10, max_wait=1)
+def test_nonsense_submissions_are_rejected(bad):
+    assert parse_location(bad) is None
 
 
 RAW_ROUTE = {

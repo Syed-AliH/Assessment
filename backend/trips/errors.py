@@ -10,7 +10,7 @@ from .providers.base import (
     ProviderError,
     RateLimited,
 )
-from .services.heatmap import AnalysisExpired
+from .services.analyze import AnalysisExpired, ForecastMismatch
 
 UNAVAILABLE_MESSAGE = "A data service is unavailable right now. Try again shortly."
 BUSY_MESSAGE = "The data services are busy. Try again in a minute."
@@ -28,6 +28,11 @@ def api_exception_handler(exc, context):
         return _error(
             "analysis_expired", "This analysis has expired. Run the trip again.",
             status.HTTP_404_NOT_FOUND,
+        )
+    if isinstance(exc, ForecastMismatch):
+        return _error(
+            "validation_error", "The forecast does not match this trip.",
+            status.HTTP_400_BAD_REQUEST,
         )
     if isinstance(exc, NoRouteFound):
         return _error(

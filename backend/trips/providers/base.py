@@ -1,9 +1,8 @@
 """What the app needs from outside services. Nothing here knows a vendor."""
 from dataclasses import dataclass, field
-from datetime import date, datetime
+from datetime import datetime
 from typing import Protocol
 
-from ..domain.forecast_time import HourlySeries
 from ..domain.geo import LatLon
 from ..domain.sampling import TimingAnchor
 
@@ -62,9 +61,3 @@ class Geocoder(Protocol):
     def search(self, query: str) -> list[Place]:
         ...
 
-
-class WeatherProvider(Protocol):
-    def forecast(
-        self, points: list[LatLon], start: date, end: date
-    ) -> dict[LatLon, HourlySeries]:
-        """Hourly series per point. A point with no usable data is left out."""

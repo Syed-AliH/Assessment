@@ -16,6 +16,25 @@ export interface TripRequest {
   interval_miles: 10 | 25 | 50;
 }
 
+export interface ForecastRequest {
+  url: string;
+  params: Record<string, string>;
+}
+
+export interface TripPlan {
+  analysis_id: string;
+  forecast: ForecastRequest & {
+    points: [number, number][];
+    cells: [number, number][];
+  };
+}
+
+export interface ForecastResult {
+  locations: unknown[];
+  failure?: "rate_limited" | "unavailable";
+  reason?: string;
+}
+
 export interface Checkpoint {
   index: number;
   miles: number;
