@@ -11,7 +11,11 @@ maplibregl.setWorkerUrl(workerUrl);
 
 const STYLE_URL = "https://tiles.openfreemap.org/styles/positron";
 const US_CENTER: [number, number] = [-97, 39];
-const SELECTED_ROUTE_COLOR = "#14344f";
+const SELECTED_ROUTE_COLOR = "#1d4ed8";
+const STACKED_WIDTH = 860;
+const PANEL_CLEARANCE = 470;
+const TRUCK_ICON =
+  '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 5h13v11H1zM14 9h4l4 4v3h-8zM6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg>';
 const OTHER_ROUTE_COLOR = "#7b8a99";
 
 // Low stays faint so that the dangerous cells stand out.
@@ -106,6 +110,7 @@ export class TripMap {
     const truckElement = document.createElement("div");
     truckElement.className = "truck-marker";
     truckElement.setAttribute("aria-hidden", "true");
+    truckElement.innerHTML = TRUCK_ICON;
     this.truck = new maplibregl.Marker({ element: truckElement });
 
     this.map.on("load", () => {
@@ -304,11 +309,11 @@ export class TripMap {
   private fit(routes: Route[]): void {
     const bounds = new maplibregl.LngLatBounds();
     routes.forEach((route) => route.geometry.forEach((point) => bounds.extend(point)));
-    const compact = this.map.getContainer().clientWidth < 600;
+    const compact = this.map.getContainer().clientWidth < STACKED_WIDTH;
     this.map.fitBounds(bounds, {
       padding: compact
         ? { top: 50, bottom: 30, left: 30, right: 30 }
-        : { top: 90, bottom: 130, left: 70, right: 70 },
+        : { top: 90, bottom: 210, left: PANEL_CLEARANCE, right: 70 },
       duration: 500,
     });
   }

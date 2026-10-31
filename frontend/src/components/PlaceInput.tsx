@@ -10,9 +10,10 @@ interface Props {
   value: Place | null;
   onChange: (place: Place | null) => void;
   error?: string;
+  end?: boolean;
 }
 
-export function PlaceInput({ label, value, onChange, error }: Props) {
+export function PlaceInput({ label, value, onChange, error, end }: Props) {
   const id = useId();
   const [text, setText] = useState(value?.label ?? "");
   const [options, setOptions] = useState<Place[]>([]);
@@ -78,6 +79,7 @@ export function PlaceInput({ label, value, onChange, error }: Props) {
   return (
     <div className="field place-field">
       <label htmlFor={id}>{label}</label>
+      <span className={`place-marker${end ? " place-marker-end" : ""}`} aria-hidden="true" />
       <input
         id={id}
         role="combobox"

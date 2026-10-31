@@ -2,12 +2,7 @@ import { memo } from "react";
 import type { Analysis, Checkpoint, Recommendation, Risk, Route } from "../api/types";
 import { formatDuration, formatMiles, formatOffset, formatTime } from "../lib/format";
 import { RISK_COLORS, RISK_LABELS } from "../lib/risk";
-
-const BANNER_TITLES: Record<Recommendation["status"], string> = {
-  recommended: "Recommended route",
-  no_safe_route: "No safe route",
-  insufficient_data: "Not enough forecast data",
-};
+import { Icon } from "./Icon";
 
 export function RiskPill({ risk }: { risk: Risk }) {
   return (
@@ -18,14 +13,30 @@ export function RiskPill({ risk }: { risk: Risk }) {
   );
 }
 
-function RecommendationBanner({ recommendation }: { recommendation: Recommendation }) {
+function RecommendationBanner({ recommendation, routes }: { recommendation: Recommendation; routes: Route[] }) {
+  const chosen = routes.find((route) => route.id === recommendation.route_id);
+  const title =
+    recommendation.status === "recommended" && chosen
+      ? `Take ${chosen.label}`
+      : recommendation.status === "no_safe_route"
+        ? "No safe route"
+        : "Not enough forecast data";
+  // The heading already names the route, so the sentence need not repeat it.
+  const reason = chosen
+    ? recommendation.explanation.replace(`${chosen.label} is recommended: `, "")
+    : recommendation.explanation;
   return (
-    <section className={`banner banner-${recommendation.status}`} aria-live="polite">
-      <h2>{BANNER_TITLES[recommendation.status]}</h2>
-      <p>{recommendation.explanation}</p>
-      {recommendation.warnings.map((warning) => (
-        <p className="banner-warning" key={warning}>{warning}</p>
-      ))}
+    <section className={`banner banner-${recommendation.status}`}>
+      <span className="banner-icon">
+        <Icon name={recommendation.status === "recommended" ? "check" : "alert"} size={20} />
+      </span>
+      <div>
+        <h2>{title}</h2>
+        <p>{reason.charAt(0).toUpperCase() + reason.slice(1)}</p>
+        {recommendation.warnings.map((warning) => (
+          <p className="banner-warning" key={warning}>{warning}</p>
+        ))}
+      </div>
     </section>
   );
 }
@@ -43,14 +54,19 @@ function RiskBar({ route }: { route: Route }) {
   const present = segments.filter(([, miles]) => miles > 0);
   return (
     <>
-      <div className="risk-bar" aria-hidden="true">
+      <span className="risk-bar" aria-hidden="true">
         {present.map(([level, miles]) => (
           <span key={level} style={{ flexGrow: miles, background: RISK_COLORS[level] }} />
         ))}
-      </div>
-      <p className="risk-text">
-        {present.map(([level, miles]) => `${RISK_LABELS[level]} ${formatMiles(miles)}`).join(" · ")}
-      </p>
+      </span>
+      <span className="risk-text">
+        {present.map(([level, miles]) => (
+          <span key={level}>
+            <span className="risk-dot" style={{ background: RISK_COLORS[level] }} />
+            {RISK_LABELS[level]} {formatMiles(miles)}
+          </span>
+        ))}
+      </span>
     </>
   );
 }
@@ -72,11 +88,14 @@ function RouteCard({ route, badge, selected, offset, onSelect }: RouteCardProps)
       onClick={() => onSelect(route.id)}
     >
       <span className="route-card-head">
+        <span className="route-letter" aria-hidden="true">{route.label.slice(-1)}</span>
         <strong>{route.label}</strong>
         {badge && <span className="badge">{badge}</span>}
       </span>
-      <span className="route-card-stats">
-        <strong>{formatDuration(route.travel_seconds)}</strong> · {formatMiles(route.length_miles)} · arrives {formatTime(route.arrival, offset)}
+      <span className="route-stats">
+        <span><small>Drive time</small><b>{formatDuration(route.travel_seconds)}</b></span>
+        <span><small>Distance</small><b>{formatMiles(route.length_miles)}</b></span>
+        <span><small>Arrives</small><b>{formatTime(route.arrival, offset)}</b></span>
       </span>
       <RiskBar route={route} />
       <span className="route-card-foot">
@@ -92,47 +111,41 @@ function conditions(checkpoint: Checkpoint): string {
   const parts = [`${Math.round(checkpoint.wind_mph ?? 0)} mph wind`];
   if (checkpoint.rain_in_hr) parts.push(`${checkpoint.rain_in_hr.toFixed(2)} in/hr rain`);
   if (checkpoint.snow_in_hr) parts.push(`${checkpoint.snow_in_hr.toFixed(2)} in/hr snow`);
-  return parts.join(", ");
+  if (checkpoint.load_adjusted) parts.push("raised by load");
+  return parts.join(" · ");
 }
 
-interface CheckpointTableProps {
+interface CheckpointListProps {
   route: Route;
   offset: number;
   onFocus: (routeId: string, index: number) => void;
 }
 
-const CheckpointTable = memo(function CheckpointTable({ route, offset, onFocus }: CheckpointTableProps) {
+const CheckpointList = memo(function CheckpointList({ route, offset, onFocus }: CheckpointListProps) {
   return (
     <section className="checkpoints">
-      <h3>{route.label} checkpoints <span>times are {formatOffset(offset)}, the origin's zone</span></h3>
+      <div className="section-head">
+        <h3>{route.label} checkpoints</h3>
+        <span>Times in {formatOffset(offset)}, the origin's zone</span>
+      </div>
       <a className="skip-link" href="#map-area">Skip checkpoints, go to the map</a>
-      <table>
-        <thead>
-          <tr><th scope="col">Mile</th><th scope="col">ETA</th><th scope="col">Risk</th><th scope="col">Forecast</th></tr>
-        </thead>
-        <tbody>
-          {route.checkpoints.map((checkpoint) => (
-            <tr key={checkpoint.index}>
-              <td>
-                <button
-                  type="button"
-                  className="link mile-link"
-                  aria-label={`Show mile ${Math.round(checkpoint.miles)} on the map`}
-                  onClick={() => onFocus(route.id, checkpoint.index)}
-                >
-                  {Math.round(checkpoint.miles)}
-                </button>
-              </td>
-              <td>{formatTime(checkpoint.eta, offset)}</td>
-              <td><RiskPill risk={checkpoint.risk} /></td>
-              <td>
-                {conditions(checkpoint)}
-                {checkpoint.load_adjusted && <em> raised by load</em>}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+      <ol>
+        {route.checkpoints.map((checkpoint) => (
+          <li key={checkpoint.index}>
+            <button type="button" className="checkpoint" onClick={() => onFocus(route.id, checkpoint.index)}>
+              <span className="checkpoint-marker" style={{ background: RISK_COLORS[checkpoint.risk] }} />
+              <span className="checkpoint-main">
+                <b>Mile {Math.round(checkpoint.miles).toLocaleString("en-US")}</b>
+                <small>{conditions(checkpoint)}</small>
+              </span>
+              <span className="checkpoint-side">
+                <RiskPill risk={checkpoint.risk} />
+                <small>{formatTime(checkpoint.eta, offset)}</small>
+              </span>
+            </button>
+          </li>
+        ))}
+      </ol>
     </section>
   );
 });
@@ -156,12 +169,15 @@ export function Results({ analysis, selectedId, onSelect, onFocusCheckpoint }: R
 
   return (
     <div className="results">
-      <RecommendationBanner recommendation={recommendation} />
+      <RecommendationBanner recommendation={recommendation} routes={routes} />
       {notices.length > 0 && (
         <ul className="notices">
-          {notices.map((notice) => <li key={notice.code}>{notice.message}</li>)}
+          {notices.map((notice) => (
+            <li key={notice.code}><Icon name="info" size={16} /><span>{notice.message}</span></li>
+          ))}
         </ul>
       )}
+      <div className="section-head"><h3>Compare routes</h3></div>
       <div className="route-cards">
         {ordered.map((route) => (
           <RouteCard
@@ -180,7 +196,7 @@ export function Results({ analysis, selectedId, onSelect, onFocusCheckpoint }: R
           />
         ))}
       </div>
-      <CheckpointTable route={selected} offset={offset} onFocus={onFocusCheckpoint} />
+      <CheckpointList route={selected} offset={offset} onFocus={onFocusCheckpoint} />
     </div>
   );
 }

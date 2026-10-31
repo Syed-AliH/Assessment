@@ -54,7 +54,10 @@ export function ForecastPanel({ state, offset, onHour, onRetry }: Props) {
       {state.status === "ready" && (
         <>
           <div className="forecast-head">
-            <label htmlFor="forecast-hour">Forecast after departure</label>
+            <div>
+              <label htmlFor="forecast-hour">Forecast after departure</label>
+              <p className="forecast-summary">{summary}</p>
+            </div>
             <output htmlFor="forecast-hour">
               <strong>+{hour} h</strong>{" "}
               {formatTime(new Date(Date.parse(state.heatmap.start) + hour * 3_600_000).toISOString(), offset)}{" "}
@@ -78,7 +81,6 @@ export function ForecastPanel({ state, offset, onHour, onRetry }: Props) {
           <div className="forecast-scale" aria-hidden="true">
             <span>0 h</span><span>24 h</span><span>48 h</span>
           </div>
-          <p className="forecast-summary">{summary}</p>
           <ul className="legend">
             {LEGEND.map((risk) => (
               <li key={risk}>

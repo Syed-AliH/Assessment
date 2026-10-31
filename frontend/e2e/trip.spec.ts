@@ -26,7 +26,7 @@ test("short trip: routes, recommendation, heatmap, slider", async ({ page }) => 
   await expect(page.locator(".route-card").first().locator(".badge")).toBeVisible();
   await expect(page.getByRole("region", { name: "Trip results" })).toBeFocused();
   await expect(page.locator(".forecast-summary")).not.toBeEmpty();
-  expect(await page.locator(".checkpoints tbody tr").count()).toBeGreaterThan(5);
+  expect(await page.locator(".checkpoints li").count()).toBeGreaterThan(5);
   await page.waitForTimeout(1500);
   await page.screenshot({ path: `${SHOTS}/short-trip.png` });
 
@@ -80,7 +80,7 @@ test("phone layout has no horizontal scroll", async ({ page }) => {
   await page.goto("/");
   await page.screenshot({ path: `${SHOTS}/phone-start.png` });
   const form = await page.locator(".trip-form").boundingBox();
-  expect(form!.y).toBeLessThan(120);
+  expect(form!.y).toBeLessThan(140);
   await runTrip(page, ["Dallas", "Dallas, TX"], ["Houston", "Houston, TX"]);
   await page.waitForTimeout(1000);
   await page.screenshot({ path: `${SHOTS}/phone.png` });

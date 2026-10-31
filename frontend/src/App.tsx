@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { analyzeTrip, ApiError, fetchHeatmap } from "./api/client";
 import type { Analysis, TripRequest } from "./api/types";
 import { ForecastPanel, type HeatmapState } from "./components/ForecastPanel";
+import { Icon } from "./components/Icon";
 import { Results } from "./components/Results";
 import { TripForm, type FieldErrors } from "./components/TripForm";
 import { truckPositionAt } from "./lib/truckPosition";
@@ -138,13 +139,25 @@ export default function App() {
     <div className={`app${analysis ? " has-results" : ""}`}>
       <aside className="panel">
         <header className="panel-head">
-          <h1>Weather-Aware Truck Routing</h1>
-          {analysis && (
-            <button type="button" className="link" aria-expanded={formOpen} onClick={() => setFormOpen((open) => !open)}>
-              {formOpen ? "Hide trip details" : "Edit trip"}
-            </button>
-          )}
+          <span className="brand-mark"><Icon name="truck" size={21} /></span>
+          <div>
+            <h1>Weather-Aware Truck Routing</h1>
+            <p>Find the safest route for your load</p>
+          </div>
         </header>
+
+        <div className="panel-body">
+        {analysis && lastTrip.current && (
+          <div className="trip-summary">
+            <div>
+              <b>{lastTrip.current.origin.label} <Icon name="arrow" size={14} /> {lastTrip.current.destination.label}</b>
+              <small>{lastTrip.current.load_lb.toLocaleString("en-US")} lb · every {lastTrip.current.interval_miles} mi</small>
+            </div>
+            <button type="button" className="link edit-trip" aria-expanded={formOpen} onClick={() => setFormOpen((open) => !open)}>
+              <Icon name="edit" size={15} /> {formOpen ? "Hide" : "Edit"}
+            </button>
+          </div>
+        )}
 
         <div hidden={!formOpen}>
           <TripForm busy={busy} serverErrors={serverErrors} onSubmit={submit} />
@@ -181,6 +194,7 @@ export default function App() {
             forecast for the time the truck reaches each checkpoint.
           </p>
         )}
+        </div>
       </aside>
 
       <main id="map-area" className="map-area" tabIndex={-1}>
