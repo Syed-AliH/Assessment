@@ -8,7 +8,10 @@ def spa(request):
     index = settings.FRONTEND_DIST / "index.html"
     if not index.exists():
         raise Http404("Frontend has not been built")
-    return FileResponse(index.open("rb"), content_type="text/html")
+    response = FileResponse(index.open("rb"), content_type="text/html")
+    # Asset names change with each build, so a saved page would keep loading old ones.
+    response["Cache-Control"] = "no-cache"
+    return response
 
 
 urlpatterns = [

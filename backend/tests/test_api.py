@@ -349,3 +349,11 @@ def test_geocode(api, monkeypatch):
 
 def test_hourly_codes_length_constant():
     assert len(heatmap_service.hourly_codes(None, 0, 0)) == 49
+
+
+def test_app_page_is_revalidated_so_new_builds_appear(settings, tmp_path):
+    (tmp_path / "index.html").write_text("<!doctype html>")
+    settings.FRONTEND_DIST = tmp_path
+    response = APIClient().get("/")
+    assert response.status_code == 200
+    assert response["Cache-Control"] == "no-cache"
