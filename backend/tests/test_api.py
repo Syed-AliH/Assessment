@@ -189,6 +189,16 @@ def test_weather_rate_limit_says_so(api):
     assert "request limit" in notice["message"]
 
 
+def test_long_trip_uses_a_capped_number_of_lookups_and_says_so(api):
+    many = plan([(30.0, -96.0), (45.0, -80.0)], 40)
+    many = RoutePlan(**{**many.__dict__, "length_miles": 3000})
+    _, weather = api(routing=FakeRouting([many]))
+    data = analyze(api, interval_miles=10).json()
+    assert len(data["routes"][0]["checkpoints"]) > 250
+    assert len(weather.requested[0]) <= 250
+    assert "coarse_forecast" in [notice["code"] for notice in data["notices"]]
+
+
 def test_missing_forecasts_are_unknown(api):
     api(weather=FakeWeather(missing=True))
     data = analyze(api).json()

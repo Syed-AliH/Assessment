@@ -9,7 +9,7 @@ from dataclasses import dataclass
 
 from .geo import MILES_PER_DEGREE_LAT, LatLon, densify
 
-GRID_STEPS_DEGREES = (0.125, 0.25, 0.5)
+GRID_STEPS_DEGREES = (0.125, 0.25, 0.5, 0.75)
 DEFAULT_HALF_WIDTH_MILES = 30.0
 DEFAULT_MAX_CELLS = 300
 

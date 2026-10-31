@@ -69,5 +69,5 @@ GEOCODER = os.environ.get("GEOCODER", "")
 
 # Tractor-trailer empty weight, added to the load for truck road restrictions.
 TRUCK_TARE_LB = float(os.environ.get("TRUCK_TARE_LB", 33_000))
-WEATHER_CACHE_SECONDS = 30 * 60
+WEATHER_CACHE_SECONDS = 60 * 60
 ANALYSIS_CACHE_SECONDS = 60 * 60

@@ -133,6 +133,16 @@ def test_one_failed_chunk_keeps_the_other(monkeypatch):
     assert len(result) == 1
 
 
+@respx.mock
+def test_rate_limit_is_not_retried_and_keeps_the_reason():
+    route = respx.get(FREE_URL).mock(
+        return_value=httpx.Response(429, json={"reason": "Hourly API request limit exceeded."})
+    )
+    with pytest.raises(RateLimited, match="Hourly"):
+        client().forecast([POINT], TODAY, TOMORROW)
+    assert route.call_count == 1
+
+
 def test_budget_blocks_when_no_room_within_max_wait():
     budget = MinuteBudget(10, window=60)
     budget.acquire(10)

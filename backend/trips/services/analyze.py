@@ -8,7 +8,13 @@ from django.conf import settings
 from django.core.cache import cache
 
 from ..domain.forecast_time import WeatherSample, sample_at
-from ..domain.geo import LatLon, simplify, snap_point
+from ..domain.geo import (
+    MILES_PER_DEGREE_LAT,
+    LatLon,
+    coarsest_needed_step,
+    simplify,
+    snap_point,
+)
 from ..domain.ranking import Recommendation, RouteRisk, recommend, summarize_route
 from ..domain.risk import UNKNOWN, RiskAssessment, RiskLevel, classify
 from ..domain.sampling import Checkpoint, build_checkpoints
@@ -25,7 +31,10 @@ from .weather import cached_forecast
 
 logger = logging.getLogger(__name__)
 
-FORECAST_SNAP_DEGREES = 0.1
+# Each unique point is one call against the weather quota, so long trips read
+# forecasts on a coarser grid. ETAs still vary per checkpoint.
+FORECAST_SNAP_STEPS = (0.1, 0.2, 0.25, 0.5)
+MAX_FORECAST_POINTS = 250
 HOURS_OF_SERVICE_DRIVE_LIMIT_SECONDS = 11 * 3600
 LOW_CONFIDENCE_LEAD_DAYS = 7
 SLIDER_HOURS = 48
@@ -121,6 +130,7 @@ def _notices(
     departure_utc: datetime,
     weather_error: ProviderError | None,
     has_unknown_checkpoints: bool,
+    forecast_step: float,
 ) -> list[dict]:
     notices = []
 
@@ -128,11 +138,13 @@ def _notices(
         notices.append({"code": code, "message": message})
 
     if isinstance(weather_error, RateLimited):
-        add("weather_unavailable", "The free weather service is at its request limit, so risk is unknown. Try again in a minute.")
+        add("weather_unavailable", f"The free weather service is at its request limit, so risk is unknown. {weather_error}")
     elif weather_error:
         add("weather_unavailable", "The weather service did not respond, so risk is unknown. Try again shortly.")
     elif has_unknown_checkpoints:
         add("forecast_gaps", "Some checkpoints have no forecast and are shown as Unknown, so these routes may be riskier than they look.")
+    if forecast_step > FORECAST_SNAP_STEPS[0]:
+        add("coarse_forecast", f"On a trip this long, nearby checkpoints share a forecast, read about every {round(forecast_step * MILES_PER_DEGREE_LAT)} miles.")
     if len(routes) < TARGET_ROUTES:
         plural = "s" if len(routes) != 1 else ""
         add("fewer_routes", f"Only {len(routes)} distinct truck route{plural} found for this trip.")
@@ -167,9 +179,14 @@ def analyze_trip(
         for route in routes
     ]
 
+    forecast_step = coarsest_needed_step(
+        [(checkpoint.lat, checkpoint.lon) for items in checkpoints for checkpoint in items],
+        FORECAST_SNAP_STEPS,
+        MAX_FORECAST_POINTS,
+    )
     forecast_points = {
         (route_index, checkpoint.index): snap_point(
-            (checkpoint.lat, checkpoint.lon), FORECAST_SNAP_DEGREES
+            (checkpoint.lat, checkpoint.lon), forecast_step
         )
         for route_index, items in enumerate(checkpoints)
         for checkpoint in items
@@ -242,5 +259,5 @@ def analyze_trip(
         "interval_miles": trip.interval_miles,
         "routes": route_payloads,
         "recommendation": _serialize_recommendation(recommend(summaries, trip.interval_miles)),
-        "notices": _notices(routes, departure_utc, weather_error, has_unknown),
+        "notices": _notices(routes, departure_utc, weather_error, has_unknown, forecast_step),
     }

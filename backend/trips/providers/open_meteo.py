@@ -66,7 +66,7 @@ class MinuteBudget:
             if wait == 0.0:
                 return
             if time.monotonic() + wait > deadline:
-                raise RateLimited("Weather request budget used up for this minute")
+                raise RateLimited("Try again in a minute.")
             time.sleep(wait)
 
 
@@ -110,6 +110,13 @@ def clamp_range(start: date, end: date, today: date) -> tuple[date, date] | None
     return (start, end) if start <= end else None
 
 
+def _limit_reason(response: httpx.Response) -> str:
+    try:
+        return str(response.json()["reason"])
+    except (ValueError, KeyError, TypeError):
+        return "Try again later."
+
+
 class OpenMeteoClient:
     """Implements WeatherProvider."""
 
@@ -147,8 +154,9 @@ class OpenMeteoClient:
                 if response.status_code == 200:
                     return self._parse(response, chunk)
                 if response.status_code == 429:
-                    failure = RateLimited("Open-Meteo rate limit reached")
-                elif response.status_code >= 500:
+                    # Retrying only spends more quota, and the reason says when it resets.
+                    raise RateLimited(_limit_reason(response))
+                if response.status_code >= 500:
                     failure = UpstreamUnavailable(f"Open-Meteo returned {response.status_code}")
                 else:
                     raise UpstreamUnavailable(f"Open-Meteo rejected the request: {response.text[:200]}")

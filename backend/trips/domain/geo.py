@@ -26,6 +26,16 @@ def snap_point(point: LatLon, step: float) -> LatLon:
     return snap(point[0], step), snap(point[1], step)
 
 
+def coarsest_needed_step(
+    points: list[LatLon], steps: tuple[float, ...], max_points: int
+) -> float:
+    """The finest grid step that keeps `points` to `max_points` unique cells."""
+    for step in steps:
+        if len({snap_point(point, step) for point in points}) <= max_points:
+            return step
+    return steps[-1]
+
+
 def cumulative_miles(points: list[LatLon]) -> list[float]:
     totals = [0.0]
     for previous, current in zip(points, points[1:]):
