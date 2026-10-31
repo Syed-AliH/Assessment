@@ -190,7 +190,7 @@ def test_weather_rate_limit_says_so(api):
 
 
 def test_long_trip_uses_a_capped_number_of_lookups_and_says_so(api):
-    many = plan([(30.0, -96.0), (45.0, -80.0)], 40)
+    many = plan([(25.0, -120.0), (48.0, -70.0)], 40)
     many = RoutePlan(**{**many.__dict__, "length_miles": 3000})
     _, weather = api(routing=FakeRouting([many]))
     data = analyze(api, interval_miles=10).json()
