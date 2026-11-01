@@ -7,7 +7,7 @@ from .domain.geo import haversine_miles
 MAX_LOAD_LB = 80_000
 INTERVALS = (10, 25, 50)
 MAX_DEPARTURE_DAYS = 14
-# Local clocks run at most 12 hours behind UTC. This is a coarse check, because
+# Local clocks run at most 12 hours behind timezone.utc. This is a coarse check, because
 # the origin's zone is only known once the route comes back: see analyze_trip.
 LOCAL_CLOCK_MARGIN = timedelta(hours=12)
 MIN_TRIP_MILES = 1.0
@@ -42,7 +42,7 @@ class TripRequestSerializer(serializers.Serializer):
         except ValueError:
             raise serializers.ValidationError("Enter a valid date and time.") from None
         if departure.tzinfo is not None:
-            raise serializers.ValidationError("Send origin-local time with no UTC offset.")
+            raise serializers.ValidationError("Send origin-local time with no timezone.utc offset.")
         now = datetime.now(timezone.utc).replace(tzinfo=None)
         if departure < now - LOCAL_CLOCK_MARGIN:
             raise serializers.ValidationError("Departure cannot be in the past.")

@@ -33,6 +33,8 @@ DATABASES = {}
 FRONTEND_DIST = Path(os.environ.get("FRONTEND_DIST", BASE_DIR.parent / "frontend" / "dist"))
 WHITENOISE_ROOT = FRONTEND_DIST if FRONTEND_DIST.exists() else None
 WHITENOISE_MAX_AGE = 3600
+# Vite puts a content hash in these names, so a changed file gets a new URL.
+WHITENOISE_IMMUTABLE_FILE_TEST = lambda path, url: url.startswith("/assets/")  # noqa: E731
 
 REDIS_URL = os.environ.get("REDIS_URL", "")
 CACHES = {

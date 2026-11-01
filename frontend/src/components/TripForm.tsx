@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { Place, TripRequest } from "../api/types";
+import type { FieldErrors } from "../hooks/useTrip";
 import { toLocalInputValue } from "../lib/format";
 import { Icon } from "./Icon";
 import { PlaceInput } from "./PlaceInput";
@@ -10,8 +11,6 @@ const MAX_DEPARTURE_DAYS = 14;
 const DAY_MS = 86_400_000;
 const HEAVY_LOAD_NO_TRAVEL_LB = 30_000;
 const HEAVY_LOAD_SEVERE_LB = 40_000;
-
-export type FieldErrors = Record<string, string>;
 
 interface Props {
   busy: boolean;

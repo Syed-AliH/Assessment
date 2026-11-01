@@ -42,7 +42,7 @@ class RoutePlan:
     departure: datetime  # timezone-aware, in the origin's zone
     anchors: list[TimingAnchor] = field(default_factory=list)
     traffic_delay_seconds: float = 0
-    has_non_truck_section: bool = False
+    non_truck_miles: float = 0
 
 
 class RoutingProvider(Protocol):

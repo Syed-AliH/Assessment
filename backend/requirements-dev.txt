@@ -2,3 +2,4 @@
 pytest>=8.4,<9
 pytest-django>=4.11,<5
 respx>=0.22,<0.23
+ruff>=0.8

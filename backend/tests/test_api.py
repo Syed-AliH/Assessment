@@ -5,7 +5,6 @@ import pytest
 from rest_framework.test import APIClient
 
 from trips.domain.sampling import TimingAnchor
-from trips.providers import registry
 from trips.providers.base import (
     InvalidRequest,
     NoRouteFound,
@@ -214,6 +213,15 @@ def test_long_trip_uses_a_capped_number_of_lookups_and_says_so(api):
     assert len(data["routes"][0]["checkpoints"]) > 250
     assert len(weather.requested[0]) <= 250
     assert "coarse_forecast" in [notice["code"] for notice in data["notices"]]
+
+
+def test_non_truck_notice_names_the_route_and_ignores_the_last_mile(api):
+    short = RoutePlan(**{**plan(ROUTES["fast"], 3).__dict__, "non_truck_miles": 1.5})
+    long = RoutePlan(**{**plan(ROUTES["mid"], 4).__dict__, "non_truck_miles": 12})
+    api(routing=FakeRouting([short, long]))
+    message = next(n["message"] for n in analyze(api).json()["notices"] if n["code"] == "non_truck_section")
+    assert "Route B (about 12 mi)" in message
+    assert "Route A" not in message
 
 
 def test_missing_forecasts_are_unknown(api):

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Checkpoint } from "../api/types";
-import { corridorSummary } from "../components/ForecastPanel";
 import { formatDuration, formatOffset, formatTime } from "./format";
+import { corridorSummary } from "./risk";
 import { truckPositionAt } from "./truckPosition";
 
 function checkpoint(lat: number, eta: string): Checkpoint {

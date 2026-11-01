@@ -95,7 +95,7 @@ def test_parse_route_joins_legs_and_reads_timing():
     assert plan.length_miles == pytest.approx(10)
     assert plan.anchors[0].miles == pytest.approx(5)
     assert len(plan.anchors) == 1
-    assert plan.has_non_truck_section
+    assert plan.non_truck_miles > 10
     assert plan.departure.utcoffset() == timedelta(hours=-5)
 
 
@@ -104,7 +104,7 @@ def test_short_non_truck_stretch_at_the_pin_is_ignored():
         {"sectionType": "TRAVEL_MODE", "travelMode": "other", "startPointIndex": 0, "endPointIndex": 0},
         {"sectionType": "TRAVEL_MODE", "travelMode": "truck", "startPointIndex": 0, "endPointIndex": 2},
     ]}
-    assert not parse_route(raw).has_non_truck_section
+    assert parse_route(raw).non_truck_miles == 0
 
 
 def test_recorded_tomtom_response_parses():
@@ -113,7 +113,7 @@ def test_recorded_tomtom_response_parses():
     assert plans
     for plan in plans:
         assert plan.departure.utcoffset() is not None
-        assert not plan.has_non_truck_section
+        assert plan.non_truck_miles < 2
         assert plan.length_miles > 20
         seconds = [anchor.seconds for anchor in plan.anchors]
         miles = [anchor.miles for anchor in plan.anchors]

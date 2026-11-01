@@ -311,7 +311,36 @@ fieldset.field input[type="datetime-local"] { margin-top: 8px; }
 
 .alert .link { color: var(--danger); }
 
-.loading { color: var(--ink-soft); font-size: 14px; }
+.phases { display: flex; flex-direction: column; gap: 6px; font-size: 14px; color: var(--ink-soft); }
+
+.phases li { display: flex; align-items: center; gap: 9px; }
+
+.phases li::before {
+  content: "";
+  width: 10px;
+  height: 10px;
+  flex: none;
+  border-radius: 50%;
+  background: #cbd5e1;
+}
+
+.phases .is-active { color: var(--ink); font-weight: 600; }
+
+.phases .is-active::before { background: var(--accent); animation: pulse 1s ease-in-out infinite; }
+
+.phases .is-done::before { background: #3f9f75; }
+
+.risk-guide { font-size: 13px; color: var(--ink-soft); }
+
+.risk-guide summary { min-height: 28px; font-weight: 600; color: var(--accent); cursor: pointer; }
+
+.risk-guide table { width: 100%; margin: 6px 0 10px; border-collapse: collapse; font-size: 12px; font-variant-numeric: tabular-nums; }
+
+.risk-guide th, .risk-guide td { padding: 4px 4px 4px 0; border-bottom: 1px solid var(--line); text-align: left; font-weight: 400; white-space: nowrap; }
+
+.risk-guide thead th { font-weight: 600; color: var(--ink); }
+
+.risk-guide p + p { margin-top: 6px; }
 
 .skeleton { display: flex; flex-direction: column; gap: 10px; margin-top: 12px; }
 

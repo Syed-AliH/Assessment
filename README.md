@@ -2,6 +2,10 @@
 
 A React and Django app that helps a truck driver choose the safest route. It compares up to three truck routes against the forecast for the time the truck reaches each checkpoint, then recommends one and says why.
 
+**Live app:** https://truck-weather-routing-h4i0.onrender.com (the free tier sleeps when idle, so the first visit can take a minute)
+
+![Route comparison with the weather heatmap](docs/images/heatmap.png)
+
 ## How it works
 
 1. **Routes.** TomTom truck routing, using gross weight, departure time and traffic. If it returns fewer than three distinct routes, the app adds via-point detours. It never pads with near-duplicates, and says so when fewer than three exist.
@@ -9,7 +13,28 @@ A React and Django app that helps a truck driver choose the safest route. It com
 3. **Weather.** The server says which forecasts are needed, and the visitor's browser downloads them from Open-Meteo. Each visitor therefore spends their own quota, not one shared server allowance. The server then reads each forecast at the checkpoint's ETA, and all risk logic stays on the server.
 4. **Risk.** The worst of wind, rain and snow after the load rules, in `backend/trips/domain/risk.py`.
 5. **Recommendation.** Ranked in `backend/trips/domain/ranking.py`, with an explanation naming the criterion that decided it.
-6. **Heatmap.** Risk on a grid around the routes for each hour from 0 to 48. All 49 hours load once, so the slider changes one paint property and makes no network calls.
+6. **Heatmap.** Risk on a grid around the routes for each hour from 0 to 48. All 49 hours load once, so the slider never touches the network. Each step writes that hour into a small canvas, and the GPU blends neighbouring cells into a smooth surface. Pixel rows are spaced in Mercator, so weather stays in the right place on long trips.
+
+```mermaid
+sequenceDiagram
+    participant B as Browser
+    participant D as Django
+    participant T as TomTom
+    participant O as Open-Meteo
+    B->>D: POST /trips/plan (trip)
+    D->>T: Truck routes
+    T-->>D: Routes and timing
+    D-->>B: Forecast points needed
+    B->>O: Forecasts, on the visitor's own quota
+    O-->>B: Hourly data
+    B->>D: POST /trips/{id}/assess (forecasts)
+    D-->>B: Checkpoints, risk, recommendation
+    B->>O: Corridor forecasts
+    B->>D: POST /trips/{id}/heatmap
+    D-->>B: 49 hours of risk per cell
+```
+
+Weather moved to the browser after the hosted server hit Open-Meteo's daily limit, which is counted per IP address. Forecasts are validated on arrival, and bad data reads as Unknown.
 
 ```
 backend/trips/
@@ -83,9 +108,16 @@ npm run dev                     # http://localhost:5173
 ## Tests
 
 ```sh
-cd backend && python -m pytest
+cd backend && python -m pytest && ruff check .
 cd frontend && npm test
 ```
+
+GitHub Actions runs these on every push. Coverage worth knowing about:
+
+- Every threshold and load rule at its exact boundary.
+- Each ranking tier deciding alone, plus No Travel, ties and missing data.
+- A recorded TomTom response, and failure handling for each provider.
+- Browser tests for the full flow, phone layout, focus handling and error states.
 
 ### End-to-end tests
 

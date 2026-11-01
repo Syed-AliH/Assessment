@@ -5,6 +5,7 @@ import type { Analysis, Checkpoint, Heatmap, Route } from "../api/types";
 import { formatDuration, formatMiles, formatOffset, formatTime } from "../lib/format";
 import { RISK_BY_CODE, RISK_COLORS, RISK_LABELS } from "../lib/risk";
 import type { TruckPosition } from "../lib/truckPosition";
+import { buildRasterGrid, paintHour, type RasterGrid } from "./heatRaster";
 
 // MapLibre 6 keeps its worker in a separate file, which has to be bundled and registered.
 maplibregl.setWorkerUrl(workerUrl);
@@ -18,50 +19,8 @@ const TRUCK_ICON =
   '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M1 5h13v11H1zM14 9h4l4 4v3h-8zM6 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4zM18 19a2 2 0 1 0 0-4 2 2 0 0 0 0 4z"/></svg>';
 const OTHER_ROUTE_COLOR = "#7b8a99";
 
-// Low stays faint so that the dangerous cells stand out.
-const HEAT_FILL: Record<string, string> = {
-  low: "rgba(88, 181, 138, 0.16)",
-  moderate: "rgba(242, 194, 48, 0.5)",
-  high: "rgba(238, 134, 34, 0.6)",
-  severe: "rgba(212, 47, 42, 0.68)",
-  no_travel: "rgba(74, 16, 66, 0.78)",
-  unknown: "rgba(154, 164, 175, 0.3)",
-};
-
+const HEAT_LAYER = "heat";
 const EMPTY: FeatureCollection = { type: "FeatureCollection", features: [] };
-
-function heatColor(hour: number): maplibregl.ExpressionSpecification {
-  const stops = RISK_BY_CODE.flatMap((risk, code) => [code, HEAT_FILL[risk]]);
-  return ["match", ["get", `h${hour}`], ...stops, "rgba(0,0,0,0)"] as unknown as maplibregl.ExpressionSpecification;
-}
-
-function heatFeatures(heatmap: Heatmap): FeatureCollection {
-  const half = heatmap.step / 2;
-  return {
-    type: "FeatureCollection",
-    features: heatmap.cells.map(([lat, lon], index) => {
-      const properties: Record<string, number> = {};
-      const codes = heatmap.levels[index];
-      for (let hour = 0; hour <= heatmap.hours; hour += 1) {
-        properties[`h${hour}`] = codes.charCodeAt(hour) - 48;
-      }
-      return {
-        type: "Feature",
-        properties,
-        geometry: {
-          type: "Polygon",
-          coordinates: [[
-            [lon - half, lat - half],
-            [lon + half, lat - half],
-            [lon + half, lat + half],
-            [lon - half, lat + half],
-            [lon - half, lat - half],
-          ]],
-        },
-      };
-    }),
-  };
-}
 
 function checkpointPopup(checkpoint: Checkpoint, route: Route, offset: number): HTMLElement {
   const root = document.createElement("div");
@@ -80,9 +39,25 @@ function checkpointPopup(checkpoint: Checkpoint, route: Route, offset: number): 
   } else {
     add("", `Wind ${checkpoint.wind_mph} mph, gusts ${checkpoint.gust_mph} mph`);
     add("", `Rain ${checkpoint.rain_in_hr} in/hr, snow ${checkpoint.snow_in_hr} in/hr`);
+    if (checkpoint.cause) add("", `Risk set by ${checkpoint.cause}`);
     if (checkpoint.load_adjusted) add("", "Raised by the load weight rules");
   }
   return root;
+}
+
+/** Calm checkpoints stay small, so that risky ones stand out on a long trip. */
+function checkpointRadius(
+  calmFar: number,
+  riskyFar: number,
+  calmNear: number,
+  riskyNear: number,
+): maplibregl.ExpressionSpecification {
+  const size = (calm: number, risky: number) => ["case", ["==", ["get", "rank"], 0], calm, risky];
+  return [
+    "interpolate", ["linear"], ["zoom"],
+    3, size(calmFar, riskyFar),
+    8, size(calmNear, riskyNear),
+  ] as unknown as maplibregl.ExpressionSpecification;
 }
 
 export class TripMap {
@@ -91,6 +66,10 @@ export class TripMap {
   private analysis: Analysis | null = null;
   private selectedId: string | null = null;
   private heatmap: Heatmap | null = null;
+  private heatGrid: RasterGrid | null = null;
+  private heatCanvas = document.createElement("canvas");
+  private heatImage: ImageData | null = null;
+  private firstLabelLayer: string | undefined;
   private hour = 0;
   private hourFrame = 0;
   private labels: maplibregl.Marker[] = [];
@@ -123,21 +102,11 @@ export class TripMap {
 
   private addLayers(): void {
     const map = this.map;
-    const firstLabel = map.getStyle().layers.find((layer) => layer.type === "symbol")?.id;
+    this.firstLabelLayer = map.getStyle().layers.find((layer) => layer.type === "symbol")?.id;
 
-    map.addSource("heat", { type: "geojson", data: EMPTY, buffer: 0, tolerance: 0 });
     map.addSource("routes", { type: "geojson", data: EMPTY });
     map.addSource("checkpoints", { type: "geojson", data: EMPTY });
 
-    map.addLayer(
-      {
-        id: "heat",
-        type: "fill",
-        source: "heat",
-        paint: { "fill-color": heatColor(0), "fill-antialias": false },
-      },
-      firstLabel,
-    );
     map.addLayer({
       id: "routes-other",
       type: "line",
@@ -171,7 +140,7 @@ export class TripMap {
       source: "checkpoints",
       layout: { "circle-sort-key": ["get", "rank"] },
       paint: {
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 1.5, 8, 5],
+        "circle-radius": checkpointRadius(1.5, 3, 5, 7),
         "circle-color": ["get", "color"],
         "circle-stroke-color": "#ffffff",
         "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 3, 0, 7, 1],
@@ -183,7 +152,7 @@ export class TripMap {
       source: "checkpoints",
       layout: { "circle-sort-key": ["get", "rank"] },
       paint: {
-        "circle-radius": ["interpolate", ["linear"], ["zoom"], 3, 2.5, 8, 8],
+        "circle-radius": checkpointRadius(2.5, 5, 8, 10),
         "circle-color": ["get", "color"],
         "circle-stroke-color": "#ffffff",
         "circle-stroke-width": ["interpolate", ["linear"], ["zoom"], 3, 0.5, 7, 1.5],
@@ -340,21 +309,65 @@ export class TripMap {
     this.drawHeatmap();
   }
 
-  private drawHeatmap(): void {
-    if (!this.loaded) return;
-    const data = this.heatmap ? heatFeatures(this.heatmap) : EMPTY;
-    (this.map.getSource("heat") as maplibregl.GeoJSONSource).setData(data);
-    this.map.setPaintProperty("heat", "fill-color", heatColor(this.hour));
+  private removeHeatLayer(): void {
+    if (this.map.getLayer(HEAT_LAYER)) this.map.removeLayer(HEAT_LAYER);
+    if (this.map.getSource(HEAT_LAYER)) this.map.removeSource(HEAT_LAYER);
   }
 
-  /** Paint only: no data moves, and rapid slider input collapses to one frame. */
+  private drawHeatmap(): void {
+    if (!this.loaded) return;
+    this.removeHeatLayer();
+    this.heatGrid = null;
+    if (!this.heatmap?.cells.length) return;
+
+    const grid = buildRasterGrid(this.heatmap);
+    this.heatGrid = grid;
+    this.heatCanvas.width = grid.width;
+    this.heatCanvas.height = grid.height;
+    this.heatImage = new ImageData(grid.width, grid.height);
+    this.paintHeat();
+    this.map.addSource(HEAT_LAYER, {
+      type: "canvas",
+      canvas: this.heatCanvas,
+      animate: false,
+      coordinates: [
+        [grid.west, grid.north],
+        [grid.east, grid.north],
+        [grid.east, grid.south],
+        [grid.west, grid.south],
+      ],
+    });
+    this.map.addLayer(
+      {
+        id: HEAT_LAYER,
+        type: "raster",
+        source: HEAT_LAYER,
+        // The GPU blends neighbouring cells, which gives a smooth surface for free.
+        paint: { "raster-resampling": "linear", "raster-fade-duration": 0 },
+      },
+      this.firstLabelLayer,
+    );
+  }
+
+  private paintHeat(): void {
+    if (!this.heatGrid || !this.heatmap || !this.heatImage) return;
+    paintHour(this.heatGrid, this.heatmap.levels, this.hour, this.heatImage.data);
+    this.heatCanvas.getContext("2d")?.putImageData(this.heatImage, 0, 0);
+  }
+
+  /** Repaints a few KB of pixels, and rapid slider input collapses to one frame. */
   setHour(hour: number): void {
     this.hour = hour;
     if (this.hourFrame || !this.loaded) return;
     this.hourFrame = requestAnimationFrame(() => {
       this.hourFrame = 0;
       const started = performance.now();
-      this.map.setPaintProperty("heat", "fill-color", heatColor(this.hour));
+      this.paintHeat();
+      const source = this.map.getSource(HEAT_LAYER) as maplibregl.CanvasSource | undefined;
+      // A paused canvas source only uploads when playing, so play for one prepare.
+      source?.play();
+      source?.pause();
+      this.map.triggerRepaint();
       performance.measure("heat-set", { start: started, end: performance.now() });
       this.map.once("render", () => {
         performance.measure("heat-update", { start: started, end: performance.now() });
@@ -365,10 +378,6 @@ export class TripMap {
   setTruck(position: TruckPosition | null): void {
     if (position) this.truck.setLngLat([position.lon, position.lat]).addTo(this.map);
     else this.truck.remove();
-  }
-
-  resize(): void {
-    this.map.resize();
   }
 
   destroy(): void {

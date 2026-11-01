@@ -10,8 +10,8 @@ finer than that, and a 0.2-mile gap should not outvote a shorter trip. Any
 non-zero mileage counts as at least one interval so that it never ties zero.
 """
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 from .risk import RiskLevel
 

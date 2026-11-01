@@ -39,6 +39,9 @@ HOURS_OF_SERVICE_DRIVE_LIMIT_SECONDS = 11 * 3600
 LOW_CONFIDENCE_LEAD_DAYS = 7
 SLIDER_HOURS = 48
 GEOMETRY_TOLERANCE_DEGREES = 0.0004  # about 40 m, invisible at trip zoom
+# TomTom treats city-centre pins and the last streets of a trip as non-truck, so
+# only a stretch longer than that first or last mile is worth a warning.
+NON_TRUCK_NOTICE_MILES = 2.0
 PAST_DEPARTURE_GRACE = timedelta(minutes=5)
 ROUTE_LABELS = ("Route A", "Route B", "Route C")
 ROUTE_IDS = ("a", "b", "c")
@@ -250,8 +253,13 @@ def _notices(
         add("continuous_driving", "ETAs assume continuous driving with no rest stops. Real arrival times, and the weather met along the way, will differ on a trip this long.")
     if departure_utc - datetime.now(timezone.utc) > timedelta(days=LOW_CONFIDENCE_LEAD_DAYS):
         add("long_range_forecast", "This departure is over a week out. Forecasts at this range are much less reliable, so recheck closer to the day.")
-    if any(route.has_non_truck_section for route in routes):
-        add("non_truck_section", "Part of at least one route has no confirmed truck access. Check that stretch before relying on it.")
+    flagged = [
+        f"{label} (about {round(route.non_truck_miles)} mi)"
+        for label, route in zip(ROUTE_LABELS, routes)
+        if route.non_truck_miles > NON_TRUCK_NOTICE_MILES
+    ]
+    if flagged:
+        add("non_truck_section", f"No confirmed truck access on part of {', '.join(flagged)}. Check that stretch before relying on it.")
     if not all(route.anchors for route in routes):
         add("uniform_eta", "Detailed timing was unavailable for at least one route, so its ETAs assume constant speed.")
     return notices

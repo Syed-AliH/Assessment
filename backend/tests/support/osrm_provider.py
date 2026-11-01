@@ -4,7 +4,7 @@ Selected only by setting ROUTING_PROVIDER and GEOCODER, and lives under tests/
 so that a deployed app can never use it. OSRM's public demo routes cars, so
 results here prove the pipeline, not truck legality.
 """
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 import httpx
 

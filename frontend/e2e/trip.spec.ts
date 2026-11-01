@@ -13,7 +13,6 @@ async function runTrip(page: Page, from: [string, string], to: [string, string])
   await choosePlace(page, "Destination", ...to);
   await page.getByRole("button", { name: "Compare routes" }).click();
   await expect(page.locator(".banner")).toBeVisible();
-  // A long trip on a cold cache waits for weather quota before the heatmap arrives.
   await expect(page.locator("#forecast-hour")).toBeVisible({ timeout: 150_000 });
 }
 

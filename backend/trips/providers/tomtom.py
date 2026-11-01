@@ -20,9 +20,6 @@ KG_PER_LB = 0.45359237
 MAX_ALTERNATIVES = 4
 GEOCODE_COUNTRIES = "US,CA"
 GEOCODE_LIMIT = 6
-# TomTom marks the few metres from a pin to the nearest truck road as "other"
-# on most routes, so only a stretch longer than this is worth a warning.
-NON_TRUCK_MILES_THRESHOLD = 1.0
 
 
 def _raise_for_status(response: httpx.Response) -> None:
@@ -77,7 +74,7 @@ def parse_route(raw: dict) -> RoutePlan:
         departure=_parse_time(summary["departureTime"]),
         anchors=anchors,
         traffic_delay_seconds=summary.get("trafficDelayInSeconds", 0),
-        has_non_truck_section=_non_truck_miles(raw, points) > NON_TRUCK_MILES_THRESHOLD,
+        non_truck_miles=_non_truck_miles(raw, points),
     )
 
 

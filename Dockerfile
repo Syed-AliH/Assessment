@@ -15,6 +15,5 @@ COPY --from=frontend /app/dist /app/frontend/dist
 RUN useradd --create-home app
 USER app
 EXPOSE 8000
-# One process, so the weather quota limiter sees every request. Threads handle
-# concurrency, and the timeout allows for the limiter's longest wait.
-CMD ["sh", "-c", "exec gunicorn config.wsgi --bind 0.0.0.0:${PORT:-8000} --workers 1 --threads 8 --timeout 240"]
+# One process suits the free tier's memory, and threads handle concurrent trips.
+CMD ["sh", "-c", "exec gunicorn config.wsgi --bind 0.0.0.0:${PORT:-8000} --workers 1 --threads 8 --timeout 90"]

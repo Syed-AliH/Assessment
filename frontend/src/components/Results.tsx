@@ -109,6 +109,7 @@ function RouteCard({ route, badge, selected, offset, onSelect }: RouteCardProps)
 function conditions(checkpoint: Checkpoint): string {
   if (checkpoint.risk === "unknown") return "No forecast";
   const parts = [`${Math.round(checkpoint.wind_mph ?? 0)} mph wind`];
+  if (checkpoint.cause) parts.unshift(`Set by ${checkpoint.cause}`);
   if (checkpoint.rain_in_hr) parts.push(`${checkpoint.rain_in_hr.toFixed(2)} in/hr rain`);
   if (checkpoint.snow_in_hr) parts.push(`${checkpoint.snow_in_hr.toFixed(2)} in/hr snow`);
   if (checkpoint.load_adjusted) parts.push("raised by load");
